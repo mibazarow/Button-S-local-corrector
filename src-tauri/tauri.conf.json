@@ -1,0 +1,54 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "BUTTON-S",
+  "version": "0.1.0",
+  "identifier": "ru.buttons.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "settings",
+        "title": "BUTTON-S",
+        "width": 720,
+        "height": 720,
+        "minWidth": 620,
+        "minHeight": 560,
+        "resizable": true,
+        "center": true,
+        "visible": false,
+        "titleBarStyle": "Visible",
+        "backgroundColor": "#F7F7F9"
+      }
+    ],
+    "security": {
+      "csp": null
+    },
+    "macOSPrivateApi": true,
+    "withGlobalTauri": false
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app",
+      "dmg"
+    ],
+    "category": "Productivity",
+    "shortDescription": "Keyboard layout correction, typo fix and voice input",
+    "longDescription": "BUTTON-S accelerates typing in any macOS app: fixes keyboard layout, typos and autocorrects symbols. Works offline.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "13.0",
+      "signingIdentity": "Apple Development: Mihail Bazarov (S6LCYMJRBD)"
+    }
+  }
+}
