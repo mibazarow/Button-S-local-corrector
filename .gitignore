@@ -24,6 +24,32 @@ yarn-error.log*
 *.tmp
 *.download
 
+# Package/build artifacts outside target/
+*.app
+*.dmg
+*.pkg
+*.msi
+*.exe
+*.zip
+*.tar.gz
+*.gguf
+*.ggml
+*.bin
+*.db
+*.sqlite
+*.sqlite3
+models/
+
+# Certificates and secrets
+*.pem
+*.p12
+*.cer
+*.key
+
+# Internal docs and design screenshots (not published)
+.internal/
+MATERIALS/assests/
+
 # macOS
 .DS_Store
 ._*
