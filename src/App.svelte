@@ -11,6 +11,7 @@
     type VoiceModelStatus,
   } from "./lib/api";
   import { strings } from "./lib/i18n";
+  import appIcon from "./assets/app-icon.png";
   import Icon from "./lib/Icon.svelte";
   import Hud from "./components/Hud.svelte";
   import ResultView from "./components/ResultView.svelte";
@@ -189,7 +190,7 @@
   <div class="shell">
     <aside class="sidebar">
       <div class="brand">
-        <span class="mark">S</span>
+        <img class="mark" src={appIcon} alt="" />
         <div>
           <h1>BUTTON-S</h1>
         </div>
