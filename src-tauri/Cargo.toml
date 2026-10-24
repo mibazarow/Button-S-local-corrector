@@ -1,6 +1,6 @@
 [package]
 name = "button-s"
-version = "0.1.0"
+version = "1.0.0"
 description = "BUTTON-S — input accelerator for macOS"
 edition = "2021"
 rust-version = "1.90"
