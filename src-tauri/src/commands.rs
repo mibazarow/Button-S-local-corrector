@@ -767,6 +767,9 @@ pub fn set_hotkey(
                 return Err(format!("Сочетание уже занято действием «{other}»"));
             }
         }
+        if action == "dictate" {
+            config.voice.hotkey = combo.clone();
+        }
         config.hotkeys.insert(action, combo);
         config.save(&state.config_path)?;
         config.hotkeys.clone()

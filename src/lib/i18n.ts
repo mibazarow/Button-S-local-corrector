@@ -77,6 +77,10 @@ const ru = {
   voiceIntroTitle: "Как работает диктовка",
   voiceIntroText:
     "Нажмите {hotkey} в любом приложении и говорите — текст появится там, где стоит курсор. Сначала скачайте модель: она работает на этом Mac, аудио не уходит в интернет.",
+  voiceHotkey: "Кнопка диктовки",
+  voiceHotkeyHint:
+    "Сочетание можно изменить. Нажмите «Изменить» и введите новое сочетание, Escape отменяет.",
+  changeHotkey: "Изменить",
   asrModel: "Модели распознавания",
   modelsHint:
     "Все модели работают локально и понимают русский и английский. Аудио не покидает компьютер.",
@@ -483,6 +487,10 @@ const en: Strings = {
   voiceIntroTitle: "How dictation works",
   voiceIntroText:
     "Press {hotkey} in any app and speak — the text appears at the cursor. First download a model: it runs on this Mac and audio never leaves the computer.",
+  voiceHotkey: "Dictation shortcut",
+  voiceHotkeyHint:
+    "You can change the shortcut. Press “Change”, then type a new combination; Escape cancels.",
+  changeHotkey: "Change",
   asrModel: "Recognition models",
   modelsHint:
     "All models run locally and understand Russian and English. Audio never leaves the computer.",

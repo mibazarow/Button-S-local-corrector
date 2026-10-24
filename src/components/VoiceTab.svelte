@@ -29,6 +29,8 @@
   let saved = $state(false);
   let armedDelete = $state("");
   let deleteTimer: ReturnType<typeof setTimeout> | undefined;
+  let recordingHotkey = $state(false);
+  let hotkeyError = $state("");
 
   const modelMeta: Record<string, { name: string; desc: string; pro: string; con: string }> =
     $derived({
@@ -110,6 +112,45 @@
     }
   }
 
+  function onHotkeyKey(event: KeyboardEvent) {
+    if (!recordingHotkey) return;
+    event.preventDefault();
+
+    if (event.key === "Escape") {
+      recordingHotkey = false;
+      return;
+    }
+    if (["Meta", "Alt", "Shift", "Control"].includes(event.key)) return;
+
+    const parts: string[] = [];
+    if (event.metaKey) parts.push("Command");
+    if (event.altKey) parts.push("Alt");
+    if (event.ctrlKey) parts.push("Control");
+    if (event.shiftKey) parts.push("Shift");
+
+    if (!event.metaKey && !event.altKey && !event.ctrlKey) {
+      hotkeyError = t.needModifier;
+      return;
+    }
+
+    parts.push(event.code);
+    recordingHotkey = false;
+    saveHotkey(parts.join("+"));
+  }
+
+  async function saveHotkey(combo: string) {
+    try {
+      const updated = await api.setHotkey("dictate", combo);
+      config.hotkeys = updated;
+      hotkeyError = "";
+      saved = true;
+      setTimeout(() => (saved = false), 900);
+      refresh();
+    } catch (e) {
+      hotkeyError = String(e);
+    }
+  }
+
   async function toggleRecording() {
     try {
       if (voiceState === "recording") {
@@ -148,6 +189,8 @@
     };
   });
 </script>
+
+<svelte:window onkeydown={onHotkeyKey} />
 
 <Callout
   title={t.voiceIntroTitle}
@@ -221,7 +264,7 @@
   <div class="row">
     <div>
       <span class="row-title">{t.mode}</span>
-      <span class="row-sub">{t.hotkey}: {prettyCombo(config.hotkeys.dictate)}</span>
+      <span class="row-sub">{t.voiceHotkeyHint}</span>
     </div>
     <select class="select" bind:value={config.voice.mode} onchange={persist}>
       <option value="push-to-talk">{t.modePtt}</option>
@@ -229,6 +272,23 @@
       <option value="vad">{t.modeVad}</option>
     </select>
   </div>
+  <div class="row">
+    <div>
+      <span class="row-title">{t.voiceHotkey}</span>
+      <span class="row-sub">{t.hotkey}: {prettyCombo(config.hotkeys.dictate)}</span>
+    </div>
+    <button
+      class="btn small"
+      class:primary={recordingHotkey}
+      onclick={() => {
+        recordingHotkey = true;
+        hotkeyError = "";
+      }}
+    >
+      {recordingHotkey ? t.recordingKey : t.changeHotkey}
+    </button>
+  </div>
+  {#if hotkeyError}<p class="error small">{hotkeyError}</p>{/if}
   <div class="row">
     <div>
       <span class="row-title">{t.language}</span>
