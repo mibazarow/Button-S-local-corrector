@@ -14,6 +14,16 @@ BUTTON-S — небольшой фоновый помощник для macOS, к
 > Следом выйдут версии для **Windows** и **Linux**. Официальные сборки и исходники —
 > в этом репозитории, готовый DMG появится в разделе **Releases**.
 
+<p align="center">
+  <a href="https://www.donationalerts.com/r/bazarow_ru">
+    <img src="docs/assets/readme/support.png" alt="Поддержать разработку BUTTON-S" width="960">
+  </a>
+</p>
+<p align="center">
+  <b>Поддержать проект:</b> <a href="https://www.donationalerts.com/r/bazarow_ru">DonationAlerts</a> —
+  это ускоряет релиз macOS-версии и порт на Windows и Linux.
+</p>
+
 ## Проблема
 
 Мы печатаем быстро и постоянно спотыкаемся об одно и то же:
