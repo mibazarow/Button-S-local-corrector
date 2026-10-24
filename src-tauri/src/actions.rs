@@ -321,6 +321,7 @@ pub async fn run_prompt(
 
     let language = platform::language_for_text(&text).unwrap_or("ru");
     let filled = llm::fill_template(&prompt.template, &text, language, &app_id);
+    let filled = llm::with_note(&filled, &prompt.note);
 
     state.emit_event(
         "action-state",

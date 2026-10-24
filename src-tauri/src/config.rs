@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -104,6 +104,8 @@ pub struct Provider {
     pub model: String,
     pub key_ref: String,
     pub timeout_sec: u64,
+    /// Кэш списка моделей endpoint с момента последнего подключения.
+    pub models: Vec<String>,
 }
 
 impl Default for Provider {
@@ -114,6 +116,7 @@ impl Default for Provider {
             model: String::new(),
             key_ref: String::new(),
             timeout_sec: 120,
+            models: Vec::new(),
         }
     }
 }
@@ -187,7 +190,7 @@ pub struct AppRules {
     pub name: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Privacy {
     pub history: bool,
@@ -203,6 +206,17 @@ pub struct Sync {
     pub kind: String,
     pub path: String,
     pub encrypted: bool,
+}
+
+impl Default for Sync {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            kind: "folder".into(),
+            path: String::new(),
+            encrypted: false,
+        }
+    }
 }
 
 impl Default for Config {
@@ -306,40 +320,9 @@ impl Default for Vad {
 
 impl Default for Llm {
     fn default() -> Self {
-        let mut providers = BTreeMap::new();
-        providers.insert(
-            "ollama".into(),
-            Provider {
-                kind: "ollama".into(),
-                base_url: "http://localhost:11434".into(),
-                model: "qwen2.5:7b".into(),
-                key_ref: String::new(),
-                timeout_sec: 120,
-            },
-        );
-        providers.insert(
-            "openai".into(),
-            Provider {
-                kind: "openai".into(),
-                base_url: "https://api.openai.com/v1".into(),
-                model: "gpt-4o-mini".into(),
-                key_ref: "openai".into(),
-                timeout_sec: 120,
-            },
-        );
-        providers.insert(
-            "anthropic".into(),
-            Provider {
-                kind: "anthropic".into(),
-                base_url: "https://api.anthropic.com".into(),
-                model: "claude-3-5-sonnet-latest".into(),
-                key_ref: "anthropic".into(),
-                timeout_sec: 120,
-            },
-        );
         Self {
-            default_provider: "ollama".into(),
-            providers,
+            default_provider: String::new(),
+            providers: BTreeMap::new(),
             max_input_chars: 20000,
             history: false,
             temperature: 0.2,
@@ -384,30 +367,50 @@ impl Default for Lists {
     }
 }
 
-impl Default for Privacy {
-    fn default() -> Self {
-        Self {
-            history: false,
-            history_text: false,
-            telemetry: false,
-            encrypt_history: false,
+/// Убирает заготовленные провайдеры версии 2 (ollama/openai/anthropic),
+/// если пользователь их не менял и не задавал к ним ключ.
+fn migrate_v2_to_v3(config: &mut Config) {
+    let presets: &[(&str, &str, &str, &str)] = &[
+        ("ollama", "ollama", "http://localhost:11434", "qwen2.5:7b"),
+        ("openai", "openai", "https://api.openai.com/v1", "gpt-4o-mini"),
+        (
+            "anthropic",
+            "anthropic",
+            "https://api.anthropic.com",
+            "claude-3-5-sonnet-latest",
+        ),
+    ];
+
+    for (name, kind, base_url, model) in presets {
+        let untouched = config.llm.providers.get(*name).is_some_and(|provider| {
+            provider.kind == *kind
+                && provider.base_url == *base_url
+                && provider.model == *model
+                && provider.timeout_sec == 120
+                && (provider.key_ref.is_empty()
+                    || crate::llm::read_key(&provider.key_ref).is_err())
+        });
+        if untouched {
+            config.llm.providers.remove(*name);
         }
+    }
+
+    if !config
+        .llm
+        .providers
+        .contains_key(&config.llm.default_provider)
+    {
+        config.llm.default_provider = config
+            .llm
+            .providers
+            .keys()
+            .next()
+            .cloned()
+            .unwrap_or_default();
     }
 }
 
-impl Default for Sync {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            kind: "folder".into(),
-            path: String::new(),
-            encrypted: false,
-        }
-    }
-}
-
-pub fn default_hotkeys() -> BTreeMap<String, String> {
-    [
+pub fn default_hotkeys() -> BTreeMap<String, String> {    [
         ("convertLastWord", "Command+Alt+KeyZ"),
         ("convertSelection", "Command+Alt+KeyL"),
         ("undoFix", "Command+Alt+Backspace"),
@@ -483,7 +486,14 @@ impl Config {
         match fs::read_to_string(path) {
             Ok(raw) => match serde_json::from_str::<Config>(&raw) {
                 Ok(mut config) => {
+                    let migrated = config.schema_version < 3;
+                    if migrated {
+                        migrate_v2_to_v3(&mut config);
+                    }
                     config.normalize();
+                    if migrated {
+                        let _ = config.save(path);
+                    }
                     (config, None)
                 }
                 Err(error) => {
@@ -541,6 +551,15 @@ impl Config {
             self.replacements = default_replacements();
         }
         self.llm.max_input_chars = self.llm.max_input_chars.clamp(1000, 200_000);
+        if !self.llm.providers.contains_key(&self.llm.default_provider) {
+            self.llm.default_provider = self
+                .llm
+                .providers
+                .keys()
+                .next()
+                .cloned()
+                .unwrap_or_default();
+        }
         self.voice.max_duration_sec = self.voice.max_duration_sec.clamp(5, 3600);
         self.schema_version = SCHEMA_VERSION;
     }
@@ -619,8 +638,7 @@ impl Config {
     }
 }
 
-fn is_password_manager(bundle_id: &str) -> bool {
-    const MANAGERS: &[&str] = &[
+fn is_password_manager(bundle_id: &str) -> bool {    const MANAGERS: &[&str] = &[
         "com.1password.1password",
         "com.agilebits.onepassword7",
         "com.bitwarden.desktop",
@@ -644,4 +662,52 @@ pub enum Feature {
     Capitalization,
     Lists,
     ShiftFix,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn migration_drops_untouched_presets_and_keeps_custom_providers() {
+        let mut config = Config::default();
+        let old_preset = Provider {
+            kind: "ollama".into(),
+            base_url: "http://localhost:11434".into(),
+            model: "qwen2.5:7b".into(),
+            key_ref: String::new(),
+            timeout_sec: 120,
+            models: Vec::new(),
+        };
+        let mut edited = old_preset.clone();
+        edited.model = "llama3:latest".into();
+        let custom = Provider {
+            kind: "openai".into(),
+            base_url: "https://my-proxy.example/v1".into(),
+            model: "gpt-4o".into(),
+            key_ref: "provider:My proxy".into(),
+            timeout_sec: 60,
+            models: vec!["gpt-4o".into()],
+        };
+
+        config.llm.providers.insert("ollama".into(), old_preset);
+        config.llm.providers.insert("ollama-edited".into(), edited);
+        config.llm.providers.insert("My proxy".into(), custom);
+        config.llm.default_provider = "ollama".into();
+
+        migrate_v2_to_v3(&mut config);
+
+        assert!(!config.llm.providers.contains_key("ollama"));
+        assert!(config.llm.providers.contains_key("ollama-edited"));
+        assert!(config.llm.providers.contains_key("My proxy"));
+        assert_eq!(config.llm.default_provider, "My proxy");
+    }
+
+    #[test]
+    fn normalize_fixes_default_provider_pointing_nowhere() {
+        let mut config = Config::default();
+        config.llm.default_provider = "ghost".into();
+        config.normalize();
+        assert_eq!(config.llm.default_provider, "");
+    }
 }

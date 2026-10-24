@@ -15,9 +15,56 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::platform;
 use crate::state::AppState;
 
-const MODEL_FILE: &str = "ggml-base.bin";
-pub const MODEL_URL: &str =
-    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin";
+const MODEL_DIR: &str = "models";
+
+/// Каталог доступных Whisper-моделей: от лёгкой до максимальной.
+/// Все мультиязычные — понимают русский и английский.
+pub struct VoiceModelSpec {
+    pub id: &'static str,
+    pub file: &'static str,
+    pub size_bytes: u64,
+}
+
+pub const VOICE_MODELS: &[VoiceModelSpec] = &[
+    VoiceModelSpec {
+        id: "tiny",
+        file: "ggml-tiny.bin",
+        size_bytes: 77_691_713,
+    },
+    VoiceModelSpec {
+        id: "base",
+        file: "ggml-base.bin",
+        size_bytes: 147_951_465,
+    },
+    VoiceModelSpec {
+        id: "small",
+        file: "ggml-small.bin",
+        size_bytes: 487_601_967,
+    },
+    VoiceModelSpec {
+        id: "medium",
+        file: "ggml-medium.bin",
+        size_bytes: 1_533_763_059,
+    },
+    VoiceModelSpec {
+        id: "large-v3-turbo",
+        file: "ggml-large-v3-turbo.bin",
+        size_bytes: 1_624_555_275,
+    },
+];
+
+pub fn model_url(file: &str) -> String {
+    format!("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{file}")
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceModelView {
+    pub id: String,
+    pub size_bytes: u64,
+    pub downloaded: bool,
+    pub active: bool,
+}
 
 enum Command {
     Start,
@@ -39,16 +86,20 @@ pub struct VoiceModelStatus {
 
 static DOWNLOADING: AtomicBool = AtomicBool::new(false);
 
+pub fn models_dir(state: &AppState) -> PathBuf {
+    state
+        .config_path
+        .parent()
+        .map(|path| path.join(MODEL_DIR))
+        .unwrap_or_else(|| PathBuf::from(MODEL_DIR))
+}
+
 pub fn model_path(state: &AppState) -> PathBuf {
     let configured = state.config.read().voice.model.clone();
     if !configured.is_empty() {
         return PathBuf::from(configured);
     }
-    state
-        .config_path
-        .parent()
-        .map(|path| path.join("models").join(MODEL_FILE))
-        .unwrap_or_else(|| PathBuf::from(MODEL_FILE))
+    models_dir(state).join("ggml-base.bin")
 }
 
 pub fn model_status(state: &AppState) -> VoiceModelStatus {
@@ -60,6 +111,41 @@ pub fn model_status(state: &AppState) -> VoiceModelStatus {
         size,
         downloading: DOWNLOADING.load(Ordering::Relaxed),
     }
+}
+
+/// Каталог моделей с признаками «скачана» и «активная».
+pub fn list_models(state: &AppState) -> Vec<VoiceModelView> {
+    let active_path = model_path(state);
+    VOICE_MODELS
+        .iter()
+        .map(|spec| {
+            let path = models_dir(state).join(spec.file);
+            let size = std::fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0);
+            let downloaded = size > 10_000_000;
+            VoiceModelView {
+                id: spec.id.to_string(),
+                size_bytes: spec.size_bytes,
+                downloaded,
+                active: downloaded && path == active_path,
+            }
+        })
+        .collect()
+}
+
+/// Переключает активную модель на уже скачанную.
+pub fn use_model(state: &AppState, id: &str) -> Result<(), String> {
+    let spec = VOICE_MODELS
+        .iter()
+        .find(|spec| spec.id == id)
+        .ok_or_else(|| format!("Неизвестная модель: {id}"))?;
+    let path = models_dir(state).join(spec.file);
+    let size = std::fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0);
+    if size <= 10_000_000 {
+        return Err("Модель не скачана".into());
+    }
+    let mut config = state.config.write();
+    config.voice.model = path.to_string_lossy().to_string();
+    config.save(&state.config_path)
 }
 
 fn sender(app: &AppHandle, state: &Arc<AppState>) -> &'static Sender<Command> {
@@ -208,7 +294,7 @@ fn start_recording(app: &AppHandle, state: &Arc<AppState>) -> Result<Recording, 
     }
 
     let host = cpal::default_host();
-    let device = if config_voice_device_is_default(&state) {
+    let device = if config_voice_device_is_default(state) {
         host.default_input_device()
     } else {
         let name = state.config.read().voice.device.clone();
@@ -249,7 +335,7 @@ fn start_recording(app: &AppHandle, state: &Arc<AppState>) -> Result<Recording, 
         .play()
         .map_err(|error| format!("Не удалось начать запись: {error}"))?;
 
-    show_hud(app, &state);
+    show_hud(app, state);
     state.emit_event("voice-state", json!({ "state": "recording" }));
 
     Ok(Recording {
@@ -510,7 +596,7 @@ fn transcribe(
 
     if !punctuation {
         text = text
-            .trim_end_matches(|c: char| matches!(c, '.' | ',' | '!' | '?' | ';' | ':' | '…'))
+            .trim_end_matches(['.', ',', '!', '?', ';', ':', '…'])
             .to_string();
     }
 
@@ -561,6 +647,58 @@ fn notify_error(state: &AppState, text: &str) {
     state.emit_event("toast", json!({ "kind": "error", "text": text }));
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+
+    fn temp_state(tag: &str) -> (AppState, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("button-s-test-{tag}-{}", now_millis()));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let config_path = dir.join("config.json");
+        (AppState::new(Config::default(), config_path.clone()), dir)
+    }
+
+    #[test]
+    fn lists_and_switches_models() {
+        let (state, dir) = temp_state("models");
+
+        // Ничего не скачано: base предлагается по умолчанию, но не активна.
+        let views = list_models(&state);
+        assert_eq!(views.len(), 5);
+        assert!(views.iter().all(|view| !view.downloaded && !view.active));
+
+        // «Скачиваем» tiny как sparse-файл и делаем её активной.
+        let tiny = dir.join(MODEL_DIR).join("ggml-tiny.bin");
+        std::fs::create_dir_all(tiny.parent().unwrap()).unwrap();
+        std::fs::File::create(&tiny)
+            .unwrap()
+            .set_len(11_000_000)
+            .unwrap();
+
+        use_model(&state, "tiny").expect("switch to tiny");
+        let views = list_models(&state);
+        let tiny_view = views.iter().find(|view| view.id == "tiny").unwrap();
+        assert!(tiny_view.downloaded && tiny_view.active);
+        assert_eq!(
+            state.config.read().voice.model,
+            tiny.to_string_lossy().to_string()
+        );
+
+        // Переключение на нескачанную модель должно падать.
+        assert!(use_model(&state, "small").is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn now_millis() -> u128 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis())
+            .unwrap_or(0)
+    }
+}
+
 pub fn audio_devices() -> Vec<String> {
     let host = cpal::default_host();
     let mut devices = Vec::new();
@@ -577,12 +715,13 @@ pub fn audio_devices() -> Vec<String> {
 pub async fn download_model(
     app: &AppHandle,
     state: &Arc<AppState>,
+    id: String,
 ) -> Result<VoiceModelStatus, String> {
     if DOWNLOADING.swap(true, Ordering::Relaxed) {
         return Err("Модель уже скачивается".into());
     }
 
-    let result = download_model_inner(app, state).await;
+    let result = download_model_inner(app, state, &id).await;
     DOWNLOADING.store(false, Ordering::Relaxed);
     result
 }
@@ -590,10 +729,15 @@ pub async fn download_model(
 async fn download_model_inner(
     app: &AppHandle,
     state: &Arc<AppState>,
+    id: &str,
 ) -> Result<VoiceModelStatus, String> {
     use std::io::Write;
 
-    let path = model_path(state);
+    let spec = VOICE_MODELS
+        .iter()
+        .find(|spec| spec.id == id)
+        .ok_or_else(|| format!("Неизвестная модель: {id}"))?;
+    let path = models_dir(state).join(spec.file);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
@@ -604,7 +748,7 @@ async fn download_model_inner(
         .map_err(|error| error.to_string())?;
 
     let mut response = client
-        .get(MODEL_URL)
+        .get(model_url(spec.file))
         .send()
         .await
         .map_err(|error| format!("Нет связи с сервером модели: {error}"))?;
@@ -613,7 +757,7 @@ async fn download_model_inner(
         return Err(format!("Сервер модели вернул {}", response.status()));
     }
 
-    let total = response.content_length().unwrap_or(0);
+    let total = response.content_length().unwrap_or(spec.size_bytes);
     let temp = path.with_extension("download");
     let mut file = std::fs::File::create(&temp).map_err(|error| error.to_string())?;
     let mut downloaded = 0u64;
@@ -629,7 +773,7 @@ async fn download_model_inner(
         if total > 0 {
             let _ = app.emit(
                 "voice-download",
-                json!({ "downloaded": downloaded, "total": total }),
+                json!({ "id": spec.id, "downloaded": downloaded, "total": total }),
             );
         }
     }
@@ -650,6 +794,6 @@ async fn download_model_inner(
         let _ = config.save(&state.config_path);
     }
 
-    let _ = app.emit("voice-download", json!({ "done": true }));
+    let _ = app.emit("voice-download", json!({ "id": spec.id, "done": true }));
     Ok(model_status(state))
 }

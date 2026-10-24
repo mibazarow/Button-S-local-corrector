@@ -23,7 +23,6 @@ pub struct RunningApp {
 #[derive(Debug, Clone, Default)]
 pub struct AxContext {
     pub before: String,
-    #[allow(dead_code)]
     pub selected: Option<String>,
 }
 

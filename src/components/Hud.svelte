@@ -1,12 +1,22 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { listen } from "@tauri-apps/api/event";
+  import { api, type Language } from "../lib/api";
+  import { strings } from "../lib/i18n";
 
   let voiceState = $state("idle");
   let level = $state(0);
   let text = $state("");
+  let lang = $state<Language>("ru");
+  const t = $derived(strings[lang]);
 
   onMount(() => {
+    api
+      .getState()
+      .then((state) => {
+        lang = (state.settings.uiLanguage as Language) ?? "ru";
+      })
+      .catch(() => {});
     const stop = listen<{ state: string; level?: number; text?: string }>(
       "voice-state",
       (event) => {
@@ -23,15 +33,15 @@
 
 <div class="hud">
   {#if voiceState === "recording"}
-    <div class="recording"><span class="pulse"></span>Запись</div>
+    <div class="recording"><span class="pulse"></span>{t.recording}</div>
     <div class="bar"><span style={`width:${Math.min(100, Math.round(level * 900))}%`}></span></div>
-    <div class="tip">Отпустите клавишу, чтобы вставить текст</div>
+    <div class="tip">{t.hudRelease}</div>
   {:else if voiceState === "processing"}
-    <div class="processing">Распознаём…</div>
+    <div class="processing">{t.recognizing}</div>
     <div class="bar"><span style="width:100%"></span></div>
-    <div class="tip">Это занимает несколько секунд</div>
+    <div class="tip">{t.hudSeconds}</div>
   {:else if voiceState === "done"}
-    <div class="processing">Готово</div>
+    <div class="processing">{t.ready}</div>
     <div class="tip">{text.slice(0, 90)}</div>
   {:else}
     <div class="processing">BUTTON-S</div>

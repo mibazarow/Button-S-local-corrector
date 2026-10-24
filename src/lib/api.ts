@@ -69,6 +69,7 @@ export interface Provider {
   model: string;
   keyRef: string;
   timeoutSec: number;
+  models: string[];
 }
 
 export interface VoiceConfig {
@@ -153,6 +154,7 @@ export interface Prompt {
   name: string;
   description: string;
   template: string;
+  note: string;
   hotkey: string;
   provider: string;
   model: string;
@@ -169,6 +171,13 @@ export interface ProviderView {
   keyRef: string;
   keySet: boolean;
   timeoutSec: number;
+  models: string[];
+}
+
+export interface DiscoveryResult {
+  kind: string;
+  baseUrl: string;
+  models: string[];
 }
 
 export interface HistoryEvent {
@@ -204,6 +213,20 @@ export interface VoiceModelStatus {
   path: string;
   size: number;
   downloading: boolean;
+}
+
+export interface VoiceModelItem {
+  id: string;
+  sizeBytes: number;
+  downloaded: boolean;
+  active: boolean;
+}
+
+export interface LocalLlmItem {
+  id: string;
+  sizeBytes: number;
+  downloaded: boolean;
+  active: boolean;
 }
 
 export const api = {
@@ -250,8 +273,16 @@ export const api = {
     invoke<void>("translate_selection", { target }),
 
   getProviders: () => invoke<ProviderView[]>("get_providers"),
-  saveProvider: (name: string, provider: Provider, key: string | null) =>
-    invoke<ProviderView[]>("save_provider", { name, provider, key }),
+  saveProvider: (
+    name: string,
+    provider: Provider,
+    key: string | null,
+    original: string | null,
+  ) => invoke<ProviderView[]>("save_provider", { name, provider, key, original }),
+  deleteProvider: (name: string) =>
+    invoke<ProviderView[]>("delete_provider", { name }),
+  providerDiscover: (baseUrl: string, key: string | null, keyRef: string | null) =>
+    invoke<DiscoveryResult>("provider_discover", { baseUrl, key, keyRef }),
   setDefaultProvider: (name: string) =>
     invoke<void>("set_default_provider", { name }),
 
@@ -264,8 +295,17 @@ export const api = {
   openDataDir: () => invoke<void>("open_data_dir"),
 
   voiceStatus: () => invoke<VoiceModelStatus>("voice_model_status"),
-  voiceDownload: () => invoke<VoiceModelStatus>("voice_download_model"),
+  voiceModels: () => invoke<VoiceModelItem[]>("voice_models"),
+  voiceUseModel: (id: string) =>
+    invoke<VoiceModelItem[]>("voice_use_model", { id }),
+  voiceDownload: (id: string) =>
+    invoke<VoiceModelStatus>("voice_download_model", { id }),
   voiceDevices: () => invoke<string[]>("voice_devices"),
+
+  llmLocalModels: () => invoke<LocalLlmItem[]>("llm_local_models"),
+  llmLocalDownload: (id: string) =>
+    invoke<LocalLlmItem[]>("llm_local_download", { id }),
+  llmLocalUse: (id: string) => invoke<LocalLlmItem[]>("llm_local_use", { id }),
   voiceStart: () => invoke<void>("voice_start"),
   voiceStop: () => invoke<void>("voice_stop"),
   voiceCancel: () => invoke<void>("voice_cancel"),

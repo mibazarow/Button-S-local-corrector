@@ -1,15 +1,19 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { open, save } from "@tauri-apps/plugin-dialog";
   import { api, type UserDictionaryFile } from "../lib/api";
+  import { strings, type Strings } from "../lib/i18n";
   import Toggle from "../lib/Toggle.svelte";
+
+  let { lang }: { lang: "ru" | "en" } = $props();
+  let t: Strings = $derived(strings[lang]);
 
   let dictionaries = $state(null) as UserDictionaryFile | null;
   let word = $state("");
   let dictionaryId = $state("personal");
   let language = $state("ru");
   let newName = $state("");
-  let importPath = $state("");
-  let exportPath = $state("");
+  let search = $state("");
   let error = $state("");
   let status = $state("");
 
@@ -23,6 +27,14 @@
           })),
         )
       : [],
+  );
+
+  const filteredWords = $derived(
+    search.trim()
+      ? allWords.filter((entry) =>
+          entry.word.toLowerCase().includes(search.trim().toLowerCase()),
+        )
+      : allWords,
   );
 
   async function load() {
@@ -39,13 +51,16 @@
     }
   }
 
+  function flash(text: string) {
+    status = text;
+    setTimeout(() => (status = ""), 1500);
+  }
+
   async function add() {
     if (!word.trim()) return;
     try {
       dictionaries = await api.addWord(dictionaryId, word.trim(), language);
       word = "";
-      status = "Добавлено";
-      setTimeout(() => (status = ""), 1200);
     } catch (e) {
       error = String(e);
     }
@@ -77,25 +92,24 @@
     }
   }
 
-  async function importWords() {
-    if (!importPath.trim()) return;
-    try {
-      dictionaries = await api.importWords(importPath.trim(), dictionaryId, language);
-      status = "Импортировано";
-      setTimeout(() => (status = ""), 1500);
-    } catch (e) {
-      error = String(e);
+  async function pickImportFile() {
+    const path = await open({
+      multiple: false,
+      filters: [{ name: "Words", extensions: ["txt", "csv", "json"] }],
+    });
+    if (typeof path === "string") {
+      dictionaries = await api.importWords(path, dictionaryId, language);
+      flash(t.imported);
     }
   }
 
-  async function exportWords() {
-    if (!exportPath.trim()) return;
-    try {
-      await api.exportWords(exportPath.trim());
-      status = "Экспортировано";
-      setTimeout(() => (status = ""), 1500);
-    } catch (e) {
-      error = String(e);
+  async function pickExportFile() {
+    const path = await save({
+      filters: [{ name: "JSON", extensions: ["json"] }],
+    });
+    if (typeof path === "string") {
+      await api.exportWords(path);
+      flash(t.exported);
     }
   }
 
@@ -103,12 +117,12 @@
 </script>
 
 <div class="card">
-  <h3>Словари</h3>
-  {#each dictionaries?.dictionaries ?? [] as dictionary}
+  <h3>{t.dictionaries}</h3>
+  {#each dictionaries?.dictionaries ?? [] as dictionary (dictionary.id)}
     <div class="row">
       <div>
         <span class="row-title">{dictionary.name}</span>
-        <span class="row-sub">{dictionary.language.toUpperCase()} · {dictionary.words.length} слов</span>
+        <span class="row-sub">{dictionary.language.toUpperCase()} · {dictionary.words.length} {t.wordsUnit}</span>
       </div>
       <Toggle
         checked={dictionary.enabled}
@@ -118,24 +132,24 @@
     </div>
   {/each}
   <div class="inline" style="margin-top:10px">
-    <input class="input grow" placeholder="Новый словарь" bind:value={newName} />
-    <button class="btn" onclick={addDictionary}>Создать</button>
+    <input class="input grow" placeholder={t.newDictionary} bind:value={newName} />
+    <button class="btn" onclick={addDictionary}>{t.create}</button>
   </div>
 </div>
 
 <div class="card">
-  <h3>Добавить слово</h3>
+  <h3>{t.addWord}</h3>
   <div class="inline">
     <input
       class="input grow"
-      placeholder="Слово или фраза"
+      placeholder={t.wordPlaceholder}
       bind:value={word}
       onkeydown={(event) => {
         if (event.key === "Enter") add();
       }}
     />
     <select class="select" bind:value={dictionaryId}>
-      {#each dictionaries?.dictionaries ?? [] as dictionary}
+      {#each dictionaries?.dictionaries ?? [] as dictionary (dictionary.id)}
         <option value={dictionary.id}>{dictionary.name}</option>
       {/each}
     </select>
@@ -143,7 +157,7 @@
       <option value="ru">RU</option>
       <option value="en">EN</option>
     </select>
-    <button class="btn primary" onclick={add}>Добавить</button>
+    <button class="btn primary" onclick={add}>{t.add}</button>
     <button
       class="btn"
       onclick={async () => {
@@ -153,25 +167,32 @@
           error = String(e);
         }
       }}
-    >Из выделения</button>
+    >{t.fromSelection}</button>
   </div>
-  <p class="hint">
-    Слова из словаря не исправляются автозаменой и опечатками. Хоткей добавления
-    из выделения появится в следующем обновлении.
-  </p>
+  <p class="hint">{t.dictionaryHint}</p>
 </div>
 
 <div class="card">
-  <h3>Слова ({allWords.length})</h3>
-  {#if allWords.length === 0}
-    <div class="empty">Пока пусто</div>
+  <div class="inline" style="justify-content:space-between;margin-bottom:6px">
+    <h3 style="margin:0">{t.wordsTitle} ({allWords.length})</h3>
+    {#if allWords.length > 5}
+      <input
+        class="input"
+        style="width:200px"
+        placeholder={t.searchWords}
+        bind:value={search}
+      />
+    {/if}
+  </div>
+  {#if filteredWords.length === 0}
+    <div class="empty">{allWords.length === 0 ? t.empty : "—"}</div>
   {:else}
     <table class="table">
       <thead>
-        <tr><th>Слово</th><th>Словарь</th><th>Язык</th><th></th></tr>
+        <tr><th>{t.colWord}</th><th>{t.colDictionary}</th><th>{t.colLanguage}</th><th></th></tr>
       </thead>
       <tbody>
-        {#each allWords as entry}
+        {#each filteredWords as entry (entry.word)}
           <tr>
             <td>{entry.word}</td>
             <td class="muted">{entry.dictionary}</td>
@@ -187,14 +208,13 @@
 </div>
 
 <div class="card">
-  <h3>Импорт и экспорт</h3>
+  <h3>{t.importExport}</h3>
   <div class="inline" style="margin-bottom:8px">
-    <input class="input grow" placeholder="Путь к .txt / .csv / .json" bind:value={importPath} />
-    <button class="btn" onclick={importWords}>Импорт</button>
+    <button class="btn" onclick={pickImportFile}>{t.importBtn}</button>
+    <span class="muted small">{t.importFormats}</span>
   </div>
   <div class="inline">
-    <input class="input grow" placeholder="Куда сохранить .json" bind:value={exportPath} />
-    <button class="btn" onclick={exportWords}>Экспорт</button>
+    <button class="btn" onclick={pickExportFile}>{t.exportBtn} .json</button>
   </div>
   {#if status}<p class="saved-text">{status}</p>{/if}
   {#if error}<p class="error small">{error}</p>{/if}

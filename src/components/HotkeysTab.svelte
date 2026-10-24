@@ -1,24 +1,30 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
   import { api, type Config } from "../lib/api";
+  import { strings, prettyCombo, type Strings } from "../lib/i18n";
 
-  let { config = $bindable(), refresh }: { config: Config; refresh: () => void } =
-    $props();
+  let {
+    config = $bindable(),
+    refresh,
+    lang,
+  }: { config: Config; refresh: () => void; lang: "ru" | "en" } = $props();
 
-  const actions: { key: string; label: string }[] = [
-    { key: "convertLastWord", label: "Конвертировать последнее слово" },
-    { key: "convertSelection", label: "Конвертировать выделение" },
-    { key: "undoFix", label: "Отменить последнюю замену" },
-    { key: "dictate", label: "Диктовка" },
-    { key: "translateRuEn", label: "Перевести RU → EN" },
-    { key: "translateEnRu", label: "Перевести EN → RU" },
-    { key: "caseUpper", label: "ВЕРХНИЙ регистр" },
-    { key: "caseLower", label: "нижний регистр" },
-    { key: "caseTitle", label: "Начинать С Заглавных" },
-    { key: "caseInvert", label: "иНВЕРТИРОВАТЬ" },
-    { key: "llmFix", label: "Исправить текст через ИИ" },
-    { key: "pauseAll", label: "Пауза всех функций" },
-  ];
+  let t: Strings = $derived(strings[lang]);
+
+  const actions = $derived([
+    { key: "convertLastWord", label: t.actionConvertLastWord },
+    { key: "convertSelection", label: t.actionConvertSelection },
+    { key: "undoFix", label: t.actionUndoFix },
+    { key: "dictate", label: t.actionDictate },
+    { key: "translateRuEn", label: t.actionTranslateRuEn },
+    { key: "translateEnRu", label: t.actionTranslateEnRu },
+    { key: "caseUpper", label: t.actionCaseUpper },
+    { key: "caseLower", label: t.actionCaseLower },
+    { key: "caseTitle", label: t.actionCaseTitle },
+    { key: "caseInvert", label: t.actionCaseInvert },
+    { key: "llmFix", label: t.actionLlmFix },
+    { key: "pauseAll", label: t.actionPauseAll },
+  ]);
 
   const defaults: Record<string, string> = {
     convertLastWord: "Command+Alt+KeyZ",
@@ -60,7 +66,7 @@
     const combo = fromEvent(event);
     if (!combo) return;
     if (!event.metaKey && !event.altKey && !event.ctrlKey) {
-      error = "Нужен хотя бы один модификатор";
+      error = t.needModifier;
       return;
     }
     save(recording, combo);
@@ -97,19 +103,28 @@
 
 <div class="card">
   <div class="inline" style="justify-content:space-between;margin-bottom:6px">
-    <h3 style="margin:0">Горячие клавиши</h3>
+    <h3 style="margin:0">{t.hotkeysTitle}</h3>
     <div class="inline">
-      {#if saved}<span class="saved-text">Сохранено</span>{/if}
-      <button class="btn small" onclick={reset}>Сбросить</button>
+      {#if saved}<span class="saved-text">{t.saved}</span>{/if}
+      <button class="btn small" onclick={reset}>{t.reset}</button>
     </div>
   </div>
   <table class="table">
-    <thead><tr><th>Действие</th><th>Сочетание</th><th></th></tr></thead>
+    <thead><tr><th>{t.colAction}</th><th>{t.colCombo}</th><th></th></tr></thead>
     <tbody>
-      {#each actions as action}
+      {#each actions as action (action.key)}
         <tr>
           <td>{action.label}</td>
-          <td class="mono">{config.hotkeys[action.key] || "—"}</td>
+          <td>
+            {#if config.hotkeys[action.key]}
+              {@const pretty = prettyCombo(config.hotkeys[action.key])}
+              {#each pretty.split(" ") as part}
+                <kbd class="key">{part}</kbd>
+              {/each}
+            {:else}
+              <span class="muted">—</span>
+            {/if}
+          </td>
           <td style="text-align:right">
             <button
               class="btn small"
@@ -119,16 +134,32 @@
                 error = "";
               }}
             >
-              {recording === action.key ? "Нажмите…" : "Записать"}
+              {recording === action.key ? t.recordingKey : t.record}
             </button>
           </td>
         </tr>
       {/each}
     </tbody>
   </table>
-  <p class="hint">
-    Нажмите «Записать», затем нужное сочетание. Escape отменяет запись. Хоткеи промптов
-    задаются в разделе ИИ.
-  </p>
+  <p class="hint">{t.hotkeysHint}</p>
   {#if error}<p class="error small">{error}</p>{/if}
 </div>
+
+<style>
+  .key {
+    display: inline-block;
+    min-width: 20px;
+    text-align: center;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+    padding: 4px 6px;
+    margin-right: 3px;
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 6px;
+    background: var(--field);
+    color: var(--text);
+  }
+</style>

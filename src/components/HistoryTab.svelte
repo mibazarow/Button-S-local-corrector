@@ -1,22 +1,26 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { save } from "@tauri-apps/plugin-dialog";
   import {
     api,
     type AppState,
     type HistoryEvent,
     type HistoryStats,
   } from "../lib/api";
+  import { strings, type Strings } from "../lib/i18n";
   import Toggle from "../lib/Toggle.svelte";
 
   let {
     snapshot,
     refresh,
-  }: { snapshot: AppState; refresh: () => Promise<void> } = $props();
+    lang,
+  }: { snapshot: AppState; refresh: () => Promise<void>; lang: "ru" | "en" } =
+    $props();
 
+  let t: Strings = $derived(strings[lang]);
   let events = $state([]) as HistoryEvent[];
   let stats = $state(null) as HistoryStats | null;
   let kind = $state("");
-  let path = $state("");
   let error = $state("");
   let status = $state("");
 
@@ -56,10 +60,13 @@
   }
 
   async function exportCsv() {
-    if (!path.trim()) return;
     try {
-      await api.exportHistory(path.trim());
-      status = "Экспортировано";
+      const path = await save({
+        filters: [{ name: "CSV", extensions: ["csv"] }],
+      });
+      if (typeof path !== "string") return;
+      await api.exportHistory(path);
+      status = t.exported;
       setTimeout(() => (status = ""), 1500);
     } catch (e) {
       error = String(e);
@@ -70,14 +77,14 @@
     return new Date(ts).toLocaleString();
   }
 
-  const labels: Record<string, string> = {
-    layout: "раскладка",
-    typo: "опечатка",
-    dictation: "диктовка",
-    llm: "ИИ",
-    replace: "замена",
-    case: "регистр",
-  };
+  const labels = $derived<Record<string, string>>({
+    layout: t.kindLayout,
+    typo: t.kindTypo,
+    dictation: t.kindDictation,
+    llm: t.kindLlm,
+    replace: t.kindReplace,
+    case: t.kindCase,
+  });
 
   onMount(load);
   $effect(() => {
@@ -89,23 +96,23 @@
 <div class="card">
   <div class="row">
     <div>
-      <span class="row-title">История</span>
-      <span class="row-sub">По умолчанию выключена. Данные не покидают устройство.</span>
+      <span class="row-title">{t.historyTitle}</span>
+      <span class="row-sub">{t.historyHint}</span>
     </div>
     <Toggle
       checked={snapshot.settings.historyEnabled}
-      label="История"
+      label={t.historyTitle}
       onchange={toggleHistory}
     />
   </div>
   <div class="row">
     <div>
-      <span class="row-title">Хранить текст</span>
-      <span class="row-sub">Иначе сохраняются только типы и приложения</span>
+      <span class="row-title">{t.keepText}</span>
+      <span class="row-sub">{t.keepTextHint}</span>
     </div>
     <Toggle
       checked={snapshot.settings.historyText}
-      label="Текст истории"
+      label={t.keepText}
       onchange={toggleText}
     />
   </div>
@@ -114,18 +121,18 @@
 {#if snapshot.settings.historyEnabled}
   {#if stats}
     <div class="card">
-      <h3>Статистика</h3>
+      <h3>{t.stats}</h3>
       <div class="grid-3">
-        <div class="stat"><b>{stats.total}</b><span>всего</span></div>
-        <div class="stat"><b>{stats.layout + stats.typo}</b><span>исправлений</span></div>
-        <div class="stat"><b>{stats.savedKeystrokes}</b><span>нажатий сэкономлено</span></div>
-        <div class="stat"><b>{Math.round(stats.dictationSeconds / 60)}</b><span>минут диктовки</span></div>
-        <div class="stat"><b>{stats.llm}</b><span>запросов к ИИ</span></div>
-        <div class="stat"><b>{stats.replace}</b><span>автозамен</span></div>
+        <div class="stat"><b>{stats.total}</b><span>{t.statTotal}</span></div>
+        <div class="stat"><b>{stats.layout + stats.typo}</b><span>{t.statCorrections}</span></div>
+        <div class="stat"><b>{stats.savedKeystrokes}</b><span>{t.statKeystrokes}</span></div>
+        <div class="stat"><b>{Math.round(stats.dictationSeconds / 60)}</b><span>{t.statMinutes}</span></div>
+        <div class="stat"><b>{stats.llm}</b><span>{t.statLlm}</span></div>
+        <div class="stat"><b>{stats.replace}</b><span>{t.statReplaces}</span></div>
       </div>
       {#if stats.topApps.length}
         <p class="hint">
-          Топ приложений:
+          {t.topApps}:
           {stats.topApps.map(([app, count]) => `${app} (${count})`).join(", ")}
         </p>
       {/if}
@@ -135,26 +142,26 @@
   <div class="card">
     <div class="inline" style="justify-content:space-between;margin-bottom:8px">
       <select class="select" bind:value={kind}>
-        <option value="">Все события</option>
-        <option value="layout">Раскладка</option>
-        <option value="typo">Опечатки</option>
-        <option value="dictation">Диктовка</option>
-        <option value="llm">ИИ</option>
-        <option value="replace">Замены</option>
-        <option value="case">Регистр</option>
+        <option value="">{t.allEvents}</option>
+        <option value="layout">{t.kindLayout}</option>
+        <option value="typo">{t.kindTypo}</option>
+        <option value="dictation">{t.kindDictation}</option>
+        <option value="llm">{t.kindLlm}</option>
+        <option value="replace">{t.kindReplace}</option>
+        <option value="case">{t.kindCase}</option>
       </select>
       <div class="inline">
-        <button class="btn small" onclick={clear}>Очистить</button>
+        <button class="btn small" onclick={clear}>{t.clear}</button>
       </div>
     </div>
 
     {#if events.length === 0}
-      <div class="empty">Событий нет</div>
+      <div class="empty">{t.noEvents}</div>
     {:else}
       <table class="table">
-        <thead><tr><th>Время</th><th>Тип</th><th>Приложение</th><th>Изменение</th></tr></thead>
+        <thead><tr><th>{t.colTime}</th><th>{t.colType}</th><th>{t.colApp}</th><th>{t.colChange}</th></tr></thead>
         <tbody>
-          {#each events as event}
+          {#each events as event (event.id)}
             <tr>
               <td class="muted small">{formatTime(event.ts)}</td>
               <td>{labels[event.kind] ?? event.kind}</td>
@@ -165,7 +172,7 @@
                   <span class="muted"> → </span>
                   <span>{event.after ?? "…"}</span>
                 {:else}
-                  <span class="muted">скрыто</span>
+                  <span class="muted">{t.hidden}</span>
                 {/if}
               </td>
             </tr>
@@ -176,10 +183,12 @@
   </div>
 
   <div class="card">
-    <h3>Экспорт CSV</h3>
-    <div class="inline">
-      <input class="input grow" placeholder="Путь к файлу .csv" bind:value={path} />
-      <button class="btn" onclick={exportCsv}>Экспорт</button>
+    <div class="inline" style="justify-content:space-between">
+      <div>
+        <span class="row-title">{t.exportCsv}</span>
+        <span class="row-sub">{t.exportCsvHint}</span>
+      </div>
+      <button class="btn" onclick={exportCsv}>{t.exportBtn}</button>
     </div>
     {#if status}<p class="saved-text">{status}</p>{/if}
   </div>

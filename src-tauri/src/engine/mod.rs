@@ -19,7 +19,6 @@ pub fn start(state: Arc<AppState>) {
     thread::spawn(move || {
         let mut buffer = String::new();
         let mut sentence_start = false;
-        let mut last_word = String::new();
 
         for event in receiver {
             match event {
@@ -39,7 +38,6 @@ pub fn start(state: Arc<AppState>) {
                     update_sentence_state(
                         &state,
                         &mut sentence_start,
-                        &mut last_word,
                         replacement.as_deref().unwrap_or(&word),
                         separator,
                     );
@@ -365,7 +363,6 @@ fn apply_change(
 fn update_sentence_state(
     state: &AppState,
     sentence_start: &mut bool,
-    last_word: &mut String,
     word: &str,
     separator: char,
 ) {
@@ -379,11 +376,6 @@ fn update_sentence_state(
         ' ' => *sentence_start,
         _ => false,
     };
-
-    if !word.is_empty() {
-        *last_word = word.to_string();
-    }
-    let _ = last_word;
 }
 
 fn continue_list(state: &Arc<AppState>) {

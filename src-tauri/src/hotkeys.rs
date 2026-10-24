@@ -123,12 +123,12 @@ fn run_action(app: &AppHandle, state: &Arc<AppState>, action: &str, pressed: boo
         }
         "translateRuEn" => {
             if pressed {
-                actions::spawn_translate(app.clone(), Arc::clone(&state), "en".into());
+                actions::spawn_translate(app.clone(), Arc::clone(state), "en".into());
             }
         }
         "translateEnRu" => {
             if pressed {
-                actions::spawn_translate(app.clone(), Arc::clone(&state), "ru".into());
+                actions::spawn_translate(app.clone(), Arc::clone(state), "ru".into());
             }
         }
         "caseUpper" => {
@@ -171,7 +171,7 @@ fn run_action(app: &AppHandle, state: &Arc<AppState>, action: &str, pressed: boo
             if pressed {
                 actions::spawn_prompt(
                     app.clone(),
-                    Arc::clone(&state),
+                    Arc::clone(state),
                     "fix-grammar".into(),
                 );
             }

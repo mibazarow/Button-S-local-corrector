@@ -108,9 +108,10 @@ fn map_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryEvent> {
 }
 
 pub fn stats(connection: &Connection) -> rusqlite::Result<HistoryStats> {
-    let mut stats = HistoryStats::default();
-
-    stats.total = connection.query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0))?;
+    let mut stats = HistoryStats {
+        total: connection.query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0))?,
+        ..HistoryStats::default()
+    };
     for (kind, field) in [
         ("layout", &mut stats.layout),
         ("typo", &mut stats.typo),

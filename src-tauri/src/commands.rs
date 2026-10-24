@@ -8,11 +8,12 @@ use tauri::{AppHandle, State};
 use tauri_plugin_autostart::ManagerExt;
 
 use crate::actions;
-use crate::config::{AppRules, Config, Provider, SettingsPatch};
+use crate::config::{Config, Provider, SettingsPatch};
 use crate::engine::layout;
 use crate::history::{self, HistoryEvent, HistoryStats};
 use crate::hotkeys;
 use crate::llm::{self, Prompt, PromptStore};
+use crate::llm_local;
 use crate::platform;
 use crate::state::{AppState, StateSnapshot};
 use crate::tray;
@@ -38,6 +39,7 @@ pub struct ProviderView {
     pub key_ref: String,
     pub key_set: bool,
     pub timeout_sec: u64,
+    pub models: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -376,7 +378,7 @@ pub fn set_app_rule(
 ) -> Result<(), String> {
     {
         let mut config = state.config.write();
-        let rules = config.apps.entry(bundle_id.clone()).or_insert_with(AppRules::default);
+        let rules = config.apps.entry(bundle_id.clone()).or_default();
         if rules.name.is_none() {
             rules.name = name;
         }
@@ -421,24 +423,37 @@ pub fn get_prompts(state: State<'_, Arc<AppState>>) -> Vec<Prompt> {
 
 #[tauri::command]
 pub fn save_prompt(
+    app: AppHandle,
     state: State<'_, Arc<AppState>>,
     prompt: Prompt,
 ) -> Result<Vec<Prompt>, String> {
+    if !prompt.hotkey.is_empty() {
+        prompt
+            .hotkey
+            .parse::<tauri_plugin_global_shortcut::Shortcut>()
+            .map_err(|error| format!("Некорректное сочетание: {error}"))?;
+    }
     let mut store = state.prompts.write();
     store.upsert(prompt);
     store.save(&state.prompt_path)?;
-    Ok(store.prompts.clone())
+    drop(store);
+    hotkeys::register(&app, &state);
+    Ok(state.prompts.read().prompts.clone())
 }
 
 #[tauri::command]
 pub fn delete_prompt(
+    app: AppHandle,
     state: State<'_, Arc<AppState>>,
     id: String,
 ) -> Result<Vec<Prompt>, String> {
-    let mut store = state.prompts.write();
-    store.remove(&id);
-    store.save(&state.prompt_path)?;
-    Ok(store.prompts.clone())
+    {
+        let mut store = state.prompts.write();
+        store.remove(&id);
+        store.save(&state.prompt_path)?;
+    }
+    hotkeys::register(&app, &state);
+    Ok(state.prompts.read().prompts.clone())
 }
 
 #[tauri::command]
@@ -474,6 +489,7 @@ pub fn get_providers(state: State<'_, Arc<AppState>>) -> Vec<ProviderView> {
             key_ref: provider.key_ref.clone(),
             key_set: !provider.key_ref.is_empty() && llm::read_key(&provider.key_ref).is_ok(),
             timeout_sec: provider.timeout_sec,
+            models: provider.models.clone(),
         })
         .collect()
 }
@@ -485,21 +501,96 @@ pub fn save_provider(
     name: String,
     provider: Provider,
     key: Option<String>,
+    original: Option<String>,
 ) -> Result<Vec<ProviderView>, String> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err("Укажите название провайдера".into());
+    }
+
     let key_ref = {
         let mut config = state.config.write();
         let mut provider = provider;
-        if provider.key_ref.is_empty() && !matches!(provider.kind.as_str(), "ollama") {
-            provider.key_ref = name.clone();
+        provider.base_url = llm::normalize_base_url(&provider.base_url)?;
+        if provider.key_ref.is_empty() {
+            provider.key_ref = format!("provider:{name}");
         }
         let key_ref = provider.key_ref.clone();
+
+        // Переименование: убираем старую запись, ключ переносится вместе с key_ref.
+        if let Some(original) = original.as_deref().filter(|original| *original != name) {
+            if let Some(old) = config.llm.providers.remove(original) {
+                if old.key_ref != provider.key_ref && !old.key_ref.is_empty() {
+                    let _ = llm::save_key(&old.key_ref, "");
+                }
+                if config.llm.default_provider == original {
+                    config.llm.default_provider = name.clone();
+                }
+            }
+        }
+
+        let was_empty = config.llm.providers.is_empty();
         config.llm.providers.insert(name.clone(), provider);
+        if config.llm.default_provider.is_empty() || was_empty {
+            config.llm.default_provider = name;
+        }
         config.save(&state.config_path)?;
         key_ref
     };
 
     if let Some(key) = key {
-        llm::save_key(&key_ref, &key)?;
+        llm::save_key(&key_ref, key.trim())?;
+    }
+
+    state.emit_state();
+    tray::refresh(&app, &state);
+    Ok(get_providers(state))
+}
+
+#[tauri::command]
+pub async fn provider_discover(
+    base_url: String,
+    key: Option<String>,
+    key_ref: Option<String>,
+) -> Result<llm::DiscoveryResult, String> {
+    let key = match key.filter(|key| !key.trim().is_empty()) {
+        Some(key) => key,
+        None => key_ref
+            .filter(|reference| !reference.is_empty())
+            .and_then(|reference| llm::read_key(&reference).ok())
+            .unwrap_or_default(),
+    };
+    llm::discover(&base_url, &key).await
+}
+
+#[tauri::command]
+pub fn delete_provider(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    name: String,
+) -> Result<Vec<ProviderView>, String> {
+    let removed = {
+        let mut config = state.config.write();
+        let removed = config
+            .llm
+            .providers
+            .remove(&name)
+            .ok_or("Провайдер не найден")?;
+        if config.llm.default_provider == name {
+            config.llm.default_provider = config
+                .llm
+                .providers
+                .keys()
+                .next()
+                .cloned()
+                .unwrap_or_default();
+        }
+        config.save(&state.config_path)?;
+        removed
+    };
+
+    if !removed.key_ref.is_empty() {
+        let _ = llm::save_key(&removed.key_ref, "");
     }
 
     state.emit_state();
@@ -524,6 +615,32 @@ pub fn set_default_provider(
     state.emit_state();
     tray::refresh(&app, &state);
     Ok(())
+}
+
+#[tauri::command]
+pub fn llm_local_models(state: State<'_, Arc<AppState>>) -> Vec<llm_local::LocalLlmView> {
+    llm_local::list_local_models(&state)
+}
+
+#[tauri::command]
+pub async fn llm_local_download(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    id: String,
+) -> Result<Vec<llm_local::LocalLlmView>, String> {
+    llm_local::download_local_model(&app, &state, id).await
+}
+
+#[tauri::command]
+pub fn llm_local_use(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    id: String,
+) -> Result<Vec<llm_local::LocalLlmView>, String> {
+    llm_local::use_local_model(&state, &id)?;
+    state.emit_state();
+    tray::refresh(&app, &state);
+    Ok(llm_local::list_local_models(&state))
 }
 
 #[tauri::command]
@@ -629,11 +746,27 @@ pub fn voice_model_status(state: State<'_, Arc<AppState>>) -> VoiceModelStatus {
 }
 
 #[tauri::command]
+pub fn voice_models(state: State<'_, Arc<AppState>>) -> Vec<voice::VoiceModelView> {
+    voice::list_models(&state)
+}
+
+#[tauri::command]
+pub fn voice_use_model(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+) -> Result<Vec<voice::VoiceModelView>, String> {
+    voice::use_model(&state, &id)?;
+    state.emit_state();
+    Ok(voice::list_models(&state))
+}
+
+#[tauri::command]
 pub async fn voice_download_model(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
+    id: String,
 ) -> Result<VoiceModelStatus, String> {
-    voice::download_model(&app, &state).await
+    voice::download_model(&app, &state, id).await
 }
 
 #[tauri::command]

@@ -1,23 +1,52 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { listen } from "@tauri-apps/api/event";
-  import { api, type Config, type VoiceModelStatus } from "../lib/api";
+  import {
+    api,
+    type Config,
+    type VoiceModelItem,
+    type VoiceModelStatus,
+  } from "../lib/api";
+  import { strings, prettyCombo, type Strings } from "../lib/i18n";
   import Toggle from "../lib/Toggle.svelte";
 
-  let { config = $bindable(), refresh }: { config: Config; refresh: () => void } =
-    $props();
+  let {
+    config = $bindable(),
+    refresh,
+    lang,
+  }: { config: Config; refresh: () => void; lang: "ru" | "en" } = $props();
+
+  let t: Strings = $derived(strings[lang]);
 
   let model = $state(null) as VoiceModelStatus | null;
+  let models = $state<VoiceModelItem[]>([]);
   let devices = $state<string[]>([]);
   let progress = $state(0);
+  let downloadingId = $state("");
   let voiceState = $state("idle");
-  let busy = $state(false);
   let error = $state("");
   let saved = $state(false);
+
+  const modelMeta: Record<string, { name: string; desc: string; pro: string; con: string }> =
+    $derived({
+      tiny: { name: t.modelTiny, desc: t.modelTinyDesc, pro: t.modelTinyPro, con: t.modelTinyCon },
+      base: { name: t.modelBase, desc: t.modelBaseDesc, pro: t.modelBasePro, con: t.modelBaseCon },
+      small: { name: t.modelSmall, desc: t.modelSmallDesc, pro: t.modelSmallPro, con: t.modelSmallCon },
+      medium: { name: t.modelMedium, desc: t.modelMediumDesc, pro: t.modelMediumPro, con: t.modelMediumCon },
+      "large-v3-turbo": { name: t.modelLarge, desc: t.modelLargeDesc, pro: t.modelLargePro, con: t.modelLargeCon },
+    });
+
+  function formatSize(bytes: number): string {
+    if (bytes >= 1_000_000_000) {
+      return `${(bytes / 1_000_000_000).toFixed(1)} ${lang === "ru" ? "ГБ" : "GB"}`;
+    }
+    return `${Math.round(bytes / 1_000_000)} ${lang === "ru" ? "МБ" : "MB"}`;
+  }
 
   async function load() {
     try {
       model = await api.voiceStatus();
+      models = await api.voiceModels();
       devices = await api.voiceDevices();
     } catch (e) {
       error = String(e);
@@ -35,17 +64,29 @@
     }
   }
 
-  async function download() {
-    busy = true;
+  async function download(item: VoiceModelItem) {
+    downloadingId = item.id;
     error = "";
     progress = 0;
     try {
-      model = await api.voiceDownload();
+      model = await api.voiceDownload(item.id);
+      await load();
       refresh();
     } catch (e) {
       error = String(e);
     } finally {
-      busy = false;
+      downloadingId = "";
+      progress = 0;
+    }
+  }
+
+  async function use(item: VoiceModelItem) {
+    try {
+      models = await api.voiceUseModel(item.id);
+      model = await api.voiceStatus();
+      refresh();
+    } catch (e) {
+      error = String(e);
     }
   }
 
@@ -66,19 +107,21 @@
     const unlistenState = listen<{ state: string }>("voice-state", (event) => {
       voiceState = event.payload.state;
     });
-    const unlistenProgress = listen<{ downloaded?: number; total?: number; done?: boolean }>(
-      "voice-download",
-      (event) => {
-        if (event.payload.done) {
-          progress = 100;
-          load();
-        } else if (event.payload.total) {
-          progress = Math.round(
-            ((event.payload.downloaded ?? 0) / event.payload.total) * 100,
-          );
-        }
-      },
-    );
+    const unlistenProgress = listen<{
+      id?: string;
+      downloaded?: number;
+      total?: number;
+      done?: boolean;
+    }>("voice-download", (event) => {
+      if (event.payload.done) {
+        progress = 100;
+        load();
+      } else if (event.payload.total) {
+        progress = Math.round(
+          ((event.payload.downloaded ?? 0) / event.payload.total) * 100,
+        );
+      }
+    });
     return () => {
       unlistenState.then((fn) => fn());
       unlistenProgress.then((fn) => fn());
@@ -87,70 +130,92 @@
 </script>
 
 <div class="card">
-  <h3>Модель распознавания</h3>
-  <div class="row">
-    <div>
-      <span class="row-title">Whisper multilingual</span>
-      <span class="row-sub">
-        {model?.exists ? `Загружена · ${(model.size / 1024 / 1024).toFixed(0)} МБ` : "Не загружена"}
-      </span>
-    </div>
-    {#if !model?.exists}
-      <button class="btn primary" onclick={download} disabled={busy}>
-        {busy ? `Скачивание ${progress}%` : "Скачать модель"}
-      </button>
-    {:else}
-      <span class="pill ok">Готово</span>
-    {/if}
+  <h3>{t.asrModel}</h3>
+  <p class="hint" style="margin-top:0;margin-bottom:10px">{t.modelsHint}</p>
+
+  <div class="model-list">
+    {#each models as item (item.id)}
+      {@const meta = modelMeta[item.id] ?? { name: item.id, desc: "", pro: "", con: "" }}
+      <div class="model-row" class:active={item.active}>
+        <div class="model-info">
+          <div class="model-title">
+            <b>{meta.name}</b>
+            <span class="badge muted">{formatSize(item.sizeBytes)}</span>
+            {#if item.active}
+              <span class="badge ok">{t.modelActive}</span>
+            {/if}
+          </div>
+          <p class="model-desc">{meta.desc}</p>
+          {#if meta.pro || meta.con}
+            <ul class="traits">
+              {#if meta.pro}<li>{meta.pro}</li>{/if}
+              {#if meta.con}<li>{meta.con}</li>{/if}
+            </ul>
+          {/if}
+          {#if downloadingId === item.id && progress > 0}
+            <div class="progress"><span style={`width:${progress}%`}></span></div>
+          {/if}
+        </div>
+        <div class="model-actions">
+          {#if item.active}
+            <span class="pill ok">{t.ready}</span>
+          {:else if item.downloaded}
+            <button class="btn" onclick={() => use(item)}>{t.useModel}</button>
+          {:else if downloadingId}
+            <button class="btn" disabled>
+              {t.downloading} {downloadingId === item.id ? `${progress}%` : ""}
+            </button>
+          {:else}
+            <button class="btn primary" onclick={() => download(item)}>
+              {t.downloadModel}
+            </button>
+          {/if}
+        </div>
+      </div>
+    {/each}
   </div>
-  {#if busy && progress > 0}
-    <div class="progress" style="margin-top:8px"><span style={`width:${progress}%`}></span></div>
-  {/if}
-  <p class="hint">
-    Модель работает локально и не отправляет аудио в сеть. {model?.path ?? ""}
-  </p>
+  <p class="hint">{model?.path ?? ""}</p>
+  {#if error}<p class="error small">{error}</p>{/if}
 </div>
 
 <div class="card">
-  <h3>Диктовка</h3>
+  <h3>{t.dictation}</h3>
   <div class="row">
     <div>
-      <span class="row-title">Режим</span>
-      <span class="row-sub">Хоткей: {config.hotkeys.dictate}</span>
+      <span class="row-title">{t.mode}</span>
+      <span class="row-sub">{t.hotkey}: {prettyCombo(config.hotkeys.dictate)}</span>
     </div>
     <select class="select" bind:value={config.voice.mode} onchange={persist}>
-      <option value="push-to-talk">Удерживать клавишу</option>
-      <option value="toggle">Нажатие старт/стоп</option>
-      <option value="vad">Авто-стоп по тишине</option>
+      <option value="push-to-talk">{t.modePtt}</option>
+      <option value="toggle">{t.modeToggle}</option>
+      <option value="vad">{t.modeVad}</option>
     </select>
   </div>
   <div class="row">
     <div>
-      <span class="row-title">Язык</span>
-      <span class="row-sub">Авто — определяется моделью</span>
+      <span class="row-title">{t.language}</span>
+      <span class="row-sub">{t.languageAuto}</span>
     </div>
     <select class="select" bind:value={config.voice.language} onchange={persist}>
-      <option value="ru">Русский</option>
-      <option value="en">English</option>
-      <option value="auto">Авто</option>
+      <option value="ru">{t.langRu}</option>
+      <option value="en">{t.langEn}</option>
+      <option value="auto">{t.langAuto}</option>
     </select>
   </div>
   <div class="row">
-    <div>
-      <span class="row-title">Микрофон</span>
-    </div>
+    <span class="row-title">{t.microphone}</span>
     <select class="select" bind:value={config.voice.device} onchange={persist}>
-      <option value="default">По умолчанию</option>
+      <option value="default">{t.micDefault}</option>
       {#each devices as device}
         <option value={device}>{device}</option>
       {/each}
     </select>
   </div>
   <div class="row">
-    <span class="row-title">Пунктуация</span>
+    <span class="row-title">{t.punctuation}</span>
     <Toggle
       checked={config.voice.punctuation}
-      label="Пунктуация"
+      label={t.punctuation}
       onchange={(value) => {
         config.voice.punctuation = value;
         persist();
@@ -158,10 +223,10 @@
     />
   </div>
   <div class="row">
-    <span class="row-title">Удалять слова-паразиты</span>
+    <span class="row-title">{t.removeFillers}</span>
     <Toggle
       checked={config.voice.removeFillers}
-      label="Слова-паразиты"
+      label={t.removeFillers}
       onchange={(value) => {
         config.voice.removeFillers = value;
         persist();
@@ -169,7 +234,7 @@
     />
   </div>
   <div class="row">
-    <span class="row-title">Максимальная длительность, сек</span>
+    <span class="row-title">{t.maxDuration}</span>
     <input
       class="input"
       type="number"
@@ -181,10 +246,10 @@
     />
   </div>
   <div class="row">
-    <span class="row-title">Голосовой ввод</span>
+    <span class="row-title">{t.voiceEnabled}</span>
     <Toggle
       checked={config.voice.enabled}
-      label="Голосовой ввод"
+      label={t.voiceEnabled}
       onchange={(value) => {
         config.voice.enabled = value;
         persist();
@@ -198,22 +263,22 @@
       onclick={toggleRecording}
       disabled={!model?.exists}
     >
-      {voiceState === "recording" ? "Остановить" : "Проверить запись"}
+      {voiceState === "recording" ? t.stop : t.testRecord}
     </button>
     {#if voiceState === "recording"}
-      <span class="recording"><span class="pulse"></span>Запись</span>
+      <span class="recording"><span class="pulse"></span>{t.recording}</span>
     {:else if voiceState === "processing"}
-      <span class="muted small">Распознаём…</span>
+      <span class="muted small">{t.recognizing}</span>
     {/if}
-    {#if saved}<span class="saved-text">Сохранено</span>{/if}
+    {#if saved}<span class="saved-text">{t.saved}</span>{/if}
   </div>
   {#if error}<p class="error small">{error}</p>{/if}
 </div>
 
 <div class="card">
-  <h3>Тишина и VAD</h3>
+  <h3>{t.vadTitle}</h3>
   <div class="row">
-    <span class="row-title">Порог чувствительности</span>
+    <span class="row-title">{t.vadThreshold}</span>
     <input
       class="input"
       type="number"
@@ -226,7 +291,7 @@
     />
   </div>
   <div class="row">
-    <span class="row-title">Пауза завершения, мс</span>
+    <span class="row-title">{t.vadEnd}</span>
     <input
       class="input"
       type="number"
@@ -239,3 +304,20 @@
     />
   </div>
 </div>
+
+<style>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</style>

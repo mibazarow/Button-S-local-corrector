@@ -2,9 +2,12 @@
   import { onMount } from "svelte";
   import { listen } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { api } from "../lib/api";
+  import { api, type Language } from "../lib/api";
+  import { strings } from "../lib/i18n";
 
   let text = $state("");
+  let lang = $state<Language>("ru");
+  const t = $derived(strings[lang]);
 
   function hide() {
     getCurrentWindow().hide();
@@ -15,6 +18,12 @@
   }
 
   onMount(() => {
+    api
+      .getState()
+      .then((state) => {
+        lang = (state.settings.uiLanguage as Language) ?? "ru";
+      })
+      .catch(() => {});
     const stop = listen<{ text: string }>("result-text", (event) => {
       text = event.payload.text;
     });
@@ -32,8 +41,8 @@
 <div class="result">
   <textarea class="input" bind:value={text} readonly></textarea>
   <div class="actions">
-    <button class="btn" onclick={copy}>Копировать</button>
-    <button class="btn primary" onclick={hide}>Закрыть</button>
+    <button class="btn" onclick={copy}>{t.copy}</button>
+    <button class="btn primary" onclick={hide}>{t.close}</button>
   </div>
 </div>
 

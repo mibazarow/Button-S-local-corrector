@@ -5,6 +5,7 @@ mod engine;
 mod history;
 mod hotkeys;
 mod llm;
+mod llm_local;
 mod platform;
 mod state;
 mod tray;
@@ -58,6 +59,7 @@ pub fn run() {
     .try_init();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             tray::show_settings(app);
         }))
@@ -106,13 +108,20 @@ pub fn run() {
             commands::translate_selection,
             commands::get_providers,
             commands::save_provider,
+            commands::provider_discover,
+            commands::delete_provider,
             commands::set_default_provider,
+            commands::llm_local_models,
+            commands::llm_local_download,
+            commands::llm_local_use,
             commands::set_hotkey,
             commands::backup_default_path,
             commands::export_backup,
             commands::import_backup,
             commands::open_data_dir,
             commands::voice_model_status,
+            commands::voice_models,
+            commands::voice_use_model,
             commands::voice_download_model,
             commands::voice_devices,
             commands::voice_start,
@@ -125,7 +134,7 @@ pub fn run() {
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
-            let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             let handle = app.handle().clone();
             let config_dir = app.path().app_config_dir()?;
@@ -145,6 +154,11 @@ pub fn run() {
 
             let state = Arc::new(AppState::new(config, config_path));
             state.attach_app(handle.clone());
+            llm_local::set_dir(
+                app.path()
+                    .app_config_dir()?
+                    .join("models"),
+            );
 
             if let Some(warning) = warning {
                 state.set_error(Some(warning));

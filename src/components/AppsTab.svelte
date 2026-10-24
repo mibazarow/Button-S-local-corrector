@@ -1,22 +1,30 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { api, type Config, type RunningApp } from "../lib/api";
+  import { strings, type Strings } from "../lib/i18n";
   import Toggle from "../lib/Toggle.svelte";
 
-  let { config = $bindable(), refresh }: { config: Config; refresh: () => void } =
-    $props();
+  let {
+    config = $bindable(),
+    refresh,
+    lang,
+  }: { config: Config; refresh: () => void; lang: "ru" | "en" } = $props();
 
+  let t: Strings = $derived(strings[lang]);
   let running = $state<RunningApp[]>([]);
   let error = $state("");
   let saved = $state(false);
 
-  const features: { key: string; label: string }[] = [
-    { key: "layout", label: "Раскладка" },
-    { key: "typos", label: "Опечатки" },
-    { key: "voice", label: "Голос" },
-    { key: "capitalization", label: "Регистр" },
-    { key: "replacements", label: "Замены" },
-  ];
+  const features = $derived([
+    { key: "layout", label: t.featureLayout },
+    { key: "typos", label: t.featureTypos },
+    { key: "voice", label: t.featureVoice },
+    { key: "llm", label: t.featureLlm },
+    { key: "capitalization", label: t.featureCapitalization },
+    { key: "replacements", label: t.featureReplacements },
+    { key: "lists", label: t.featureLists },
+    { key: "shiftFix", label: t.featureShiftFix },
+  ]);
 
   const apps = $derived.by(() => {
     const map = new Map<string, { name: string; bundleId: string }>();
@@ -69,27 +77,24 @@
 
 <div class="card">
   <div class="inline" style="justify-content:space-between">
-    <h3 style="margin:0">Приложения</h3>
-    {#if saved}<span class="saved-text">Сохранено</span>{/if}
+    <h3 style="margin:0">{t.appsTitle}</h3>
+    {#if saved}<span class="saved-text">{t.saved}</span>{/if}
   </div>
-  <p class="hint" style="margin-top:4px">
-    Выключите функции для конкретных приложений. Терминалы и менеджеры паролей
-    исключены по умолчанию.
-  </p>
+  <p class="hint" style="margin-top:4px">{t.appsHint}</p>
 
   {#if apps.length === 0}
-    <div class="empty">Нет запущенных приложений</div>
+    <div class="empty">{t.noApps}</div>
   {:else}
     <table class="table">
       <thead>
         <tr>
-          <th>Приложение</th>
-          {#each features as feature}<th>{feature.label}</th>{/each}
+          <th>{t.colApp}</th>
+          {#each features as feature}<th class="col-feature">{feature.label}</th>{/each}
           <th></th>
         </tr>
       </thead>
       <tbody>
-        {#each apps as app}
+        {#each apps as app (app.bundleId)}
           <tr>
             <td>
               <div>{app.name}</div>
@@ -118,10 +123,16 @@
 </div>
 
 <div class="card">
-  <h3>Исключённые по умолчанию</h3>
+  <h3>{t.excludedTitle}</h3>
   <div class="inline">
-    {#each config.layout.excludedApps as app}
+    {#each config.layout.excludedApps as app (app)}
       <span class="pill muted mono">{app}</span>
     {/each}
   </div>
 </div>
+
+<style>
+  .col-feature {
+    text-align: center;
+  }
+</style>

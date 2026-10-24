@@ -7,6 +7,24 @@ use serde_json::json;
 
 use crate::config::{Llm, Provider};
 
+/// Системный промпт для всех провайдеров: короткий, чтобы префил был
+/// минимальным. `/no_think` отключает размышления Qwen3.
+pub const SYSTEM_PROMPT: &str =
+    "Ты — аккуратный помощник по работе с текстом. Возвращай только итоговый текст.";
+
+/// Reasoning-моделям OpenAI просим минимум размышлений: текстовые задачи
+/// их не требуют, а ответы становятся быстрее и дешевле.
+fn reasoning_effort_for(model: &str) -> Option<&'static str> {
+    let lower = model.to_lowercase();
+    if lower.starts_with("gpt-5") {
+        Some("minimal")
+    } else if lower.starts_with("o1") || lower.starts_with("o3") || lower.starts_with("o4") {
+        Some("low")
+    } else {
+        None
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Prompt {
@@ -14,6 +32,9 @@ pub struct Prompt {
     pub name: String,
     pub description: String,
     pub template: String,
+    /// Необязательная добавка пользователя к инструкции заготовки
+    /// («короче», «вежливее», «без канцелярита»).
+    pub note: String,
     pub hotkey: String,
     pub provider: String,
     pub model: String,
@@ -29,6 +50,7 @@ impl Default for Prompt {
             name: String::new(),
             description: String::new(),
             template: "{{text}}".into(),
+            note: String::new(),
             hotkey: String::new(),
             provider: String::new(),
             model: String::new(),
@@ -37,6 +59,15 @@ impl Default for Prompt {
             builtin: false,
         }
     }
+}
+
+/// Приклеивает пользовательский комментарий к заполненному шаблону.
+pub fn with_note(filled: &str, note: &str) -> String {
+    let note = note.trim();
+    if note.is_empty() {
+        return filled.to_string();
+    }
+    format!("{filled}\n\nДополнительное указание от пользователя: {note}")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -124,6 +155,20 @@ pub fn builtin_prompts() -> Vec<Prompt> {
             "",
         ),
         (
+            "rephrase",
+            "Перефразировать",
+            "Rephrase",
+            "Перефразируй текст другими словами, сохранив смысл и тон. Верни только результат.\n\n{{text}}",
+            "",
+        ),
+        (
+            "improve",
+            "Улучшить",
+            "Improve",
+            "Улучши текст: сделай его яснее, грамотнее и естественнее, сохрани смысл и стиль. Верни только результат.\n\n{{text}}",
+            "",
+        ),
+        (
             "summarize",
             "Суммировать",
             "Summarize",
@@ -138,22 +183,23 @@ pub fn builtin_prompts() -> Vec<Prompt> {
             "",
         ),
     ]
-    .into_iter()
-    .map(
-        |(id, name, description, template, hotkey)| Prompt {
-            id: id.into(),
-            name: name.into(),
-            description: description.into(),
-            template: template.into(),
-            hotkey: hotkey.into(),
-            provider: String::new(),
-            model: String::new(),
-            temperature: 0.2,
-            output: "replace".into(),
-            builtin: true,
-        },
-    )
-    .collect()
+        .into_iter()
+        .map(
+            |(id, name, description, template, hotkey)| Prompt {
+                id: id.into(),
+                name: name.into(),
+                description: description.into(),
+                template: template.into(),
+                note: String::new(),
+                hotkey: hotkey.into(),
+                provider: String::new(),
+                model: String::new(),
+                temperature: 0.2,
+                output: "replace".into(),
+                builtin: true,
+            },
+        )
+        .collect()
 }
 
 pub fn fill_template(template: &str, text: &str, language: &str, app: &str) -> String {
@@ -218,6 +264,232 @@ pub fn provider_for<'a>(llm: &'a Llm, name: &str) -> Result<&'a Provider, String
         .ok_or_else(|| format!("Провайдер «{name}» не настроен"))
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveryResult {
+    pub kind: String,
+    pub base_url: String,
+    pub models: Vec<String>,
+}
+
+/// Приводит адрес к виду `scheme://host[:port][/path]`: добавляет схему,
+/// если её нет (http для localhost, https для остальных), срезает хвостовой `/`.
+pub fn normalize_base_url(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return Err("Укажите адрес сервера".into());
+    }
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        return Ok(trimmed.to_string());
+    }
+    let host = trimmed.split('/').next().unwrap_or(trimmed);
+    let local = host.starts_with("localhost")
+        || host.starts_with("127.0.0.1")
+        || host.starts_with("[::1]")
+        || host.starts_with("0.0.0.0");
+    Ok(format!("{}://{trimmed}", if local { "http" } else { "https" }))
+}
+
+/// Пробует endpoint по трём протоколам (Ollama, OpenAI-совместимый, Anthropic)
+/// и возвращает найденный протокол и список его моделей.
+pub async fn discover(base_url: &str, key: &str) -> Result<DiscoveryResult, String> {
+    let base = normalize_base_url(base_url)?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(12))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let key = key.trim();
+    let host = base
+        .split("://")
+        .nth(1)
+        .unwrap_or_default()
+        .split('/')
+        .next()
+        .unwrap_or_default()
+        .to_lowercase();
+
+    let mut errors: Vec<String> = Vec::new();
+    let anthropic_first = host.contains("anthropic");
+
+    if anthropic_first {
+        match probe_anthropic(&client, &base, key).await {
+            Ok(result) => return Ok(result),
+            Err(error) => errors.push(error),
+        }
+    }
+    match probe_ollama(&client, &base).await {
+        Ok(result) => return Ok(result),
+        Err(error) => errors.push(error),
+    }
+    match probe_openai(&client, &base, key).await {
+        Ok(result) => return Ok(result),
+        Err(error) => errors.push(error),
+    }
+    if !anthropic_first {
+        match probe_anthropic(&client, &base, key).await {
+            Ok(result) => return Ok(result),
+            Err(error) => errors.push(error),
+        }
+    }
+
+    let auth_rejected = errors.iter().any(|error| error.contains("401") || error.contains("403"));
+    let unreachable = errors.iter().any(|error| error.contains("нет связи"));
+    if auth_rejected {
+        Err("Сервер отклонил запрос. Проверьте ключ доступа.".into())
+    } else if unreachable {
+        Err(format!("Не удалось подключиться к {base}. Проверьте адрес и что сервер запущен."))
+    } else {
+        Err(format!(
+            "По адресу {base} не найден API моделей. Поддерживаются OpenAI-совместимые серверы, Ollama и Anthropic."
+        ))
+    }
+}
+
+async fn probe_ollama(client: &reqwest::Client, base: &str) -> Result<DiscoveryResult, String> {
+    let url = format!("{base}/api/tags");
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|error| format!("Ollama: нет связи — {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!("Ollama: сервер вернул {}", response.status().as_u16()));
+    }
+    let value: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|error| format!("Ollama: некорректный ответ — {error}"))?;
+    let mut models: Vec<String> = value
+        .get("models")
+        .and_then(|models| models.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    item.get("name")
+                        .or_else(|| item.get("model"))
+                        .and_then(|name| name.as_str())
+                        .map(str::to_string)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if models.is_empty() {
+        return Err("Ollama: список моделей пуст".into());
+    }
+    models.sort();
+    models.dedup();
+    Ok(DiscoveryResult {
+        kind: "ollama".into(),
+        base_url: base.to_string(),
+        models,
+    })
+}
+
+async fn probe_openai(
+    client: &reqwest::Client,
+    base: &str,
+    key: &str,
+) -> Result<DiscoveryResult, String> {
+    let mut urls = vec![format!("{base}/models")];
+    if !base.ends_with("/v1") {
+        urls.push(format!("{base}/v1/models"));
+    }
+    let request = |url: String| {
+        let mut request = client.get(url);
+        if !key.is_empty() {
+            request = request.header("Authorization", format!("Bearer {key}"));
+        }
+        request
+    };
+    let kind = "openai";
+    let label = "OpenAI";
+    probe_models_endpoints(urls, request, kind, label, base).await
+}
+
+async fn probe_anthropic(
+    client: &reqwest::Client,
+    base: &str,
+    key: &str,
+) -> Result<DiscoveryResult, String> {
+    let urls = if base.ends_with("/v1") {
+        vec![format!("{base}/models")]
+    } else {
+        vec![format!("{base}/v1/models")]
+    };
+    let request = |url: String| {
+        let mut request = client.get(url).header("anthropic-version", "2023-06-01");
+        if !key.is_empty() {
+            request = request.header("x-api-key", key);
+        }
+        request
+    };
+    let kind = "anthropic";
+    let label = "Anthropic";
+    probe_models_endpoints(urls, request, kind, label, base).await
+}
+
+/// Общий цикл probing'а для OpenAI- и Anthropic-совместимых API:
+/// перебирает адреса, ждёт `{"data": [{"id": …}]}` со списком моделей.
+async fn probe_models_endpoints<F>(
+    urls: Vec<String>,
+    build_request: F,
+    kind: &str,
+    label: &str,
+    base: &str,
+) -> Result<DiscoveryResult, String>
+where
+    F: Fn(String) -> reqwest::RequestBuilder,
+{
+    let mut last_error = format!("{label}: сервер не отвечает");
+    for url in urls {
+        let response = match build_request(url).send().await {
+            Ok(response) => response,
+            Err(error) => {
+                last_error = format!("{label}: нет связи — {error}");
+                continue;
+            }
+        };
+        if !response.status().is_success() {
+            last_error = format!("{label}: сервер вернул {}", response.status().as_u16());
+            continue;
+        }
+        let value: serde_json::Value = match response.json().await {
+            Ok(value) => value,
+            Err(error) => {
+                last_error = format!("{label}: некорректный ответ — {error}");
+                continue;
+            }
+        };
+        let mut models: Vec<String> = value
+            .get("data")
+            .and_then(|data| data.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| {
+                        item.get("id")
+                            .and_then(|id| id.as_str())
+                            .map(str::to_string)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if models.is_empty() {
+            last_error = format!("{label}: список моделей пуст");
+            continue;
+        }
+        models.sort();
+        models.dedup();
+        return Ok(DiscoveryResult {
+            kind: kind.into(),
+            base_url: base.to_string(),
+            models,
+        });
+    }
+    Err(last_error)
+}
+
 pub async fn complete(
     provider: &Provider,
     prompt: &str,
@@ -229,6 +501,11 @@ pub async fn complete(
     } else {
         model_override
     };
+
+    if provider.kind == "local" {
+        return crate::llm_local::complete(model, prompt, temperature).await;
+    }
+
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(provider.timeout_sec.max(10)))
         .build()
@@ -243,6 +520,9 @@ pub async fn complete(
                     "model": model,
                     "prompt": prompt,
                     "stream": false,
+                    "system": SYSTEM_PROMPT,
+                    // размышления выключены: текстовые задачи их не требуют
+                    "think": false,
                     "options": { "temperature": temperature }
                 }))
                 .send()
@@ -281,6 +561,7 @@ pub async fn complete(
                     "model": model,
                     "max_tokens": 4096,
                     "temperature": temperature,
+                    "system": SYSTEM_PROMPT,
                     "messages": [{ "role": "user", "content": prompt }]
                 }))
                 .send()
@@ -310,14 +591,18 @@ pub async fn complete(
                 "{}/chat/completions",
                 provider.base_url.trim_end_matches('/')
             );
-            let mut request = client.post(url).json(&json!({
+            let mut body = json!({
                 "model": model,
                 "temperature": temperature,
                 "messages": [
-                    { "role": "system", "content": "Ты — аккуратный помощник по работе с текстом. Возвращай только итоговый текст." },
+                    { "role": "system", "content": SYSTEM_PROMPT },
                     { "role": "user", "content": prompt }
                 ]
-            }));
+            });
+            if let Some(effort) = reasoning_effort_for(model) {
+                body["reasoning_effort"] = json!(effort);
+            }
+            let mut request = client.post(url).json(&body);
 
             if !provider.key_ref.is_empty() {
                 if let Ok(key) = read_key(&provider.key_ref) {
@@ -385,4 +670,136 @@ fn now_millis() -> u128 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    #[test]
+    fn normalizes_base_urls() {
+        assert_eq!(
+            normalize_base_url("localhost:11434").unwrap(),
+            "http://localhost:11434"
+        );
+        assert_eq!(
+            normalize_base_url("api.openai.com/v1/").unwrap(),
+            "https://api.openai.com/v1"
+        );
+        assert_eq!(
+            normalize_base_url("  https://example.com  ").unwrap(),
+            "https://example.com"
+        );
+        assert!(normalize_base_url("   ").is_err());
+    }
+
+    #[test]
+    fn reasoning_effort_targets_reasoning_models_only() {
+        assert_eq!(reasoning_effort_for("gpt-5-mini"), Some("minimal"));
+        assert_eq!(reasoning_effort_for("o3-mini"), Some("low"));
+        assert_eq!(reasoning_effort_for("o4-mini"), Some("low"));
+        assert_eq!(reasoning_effort_for("gpt-4o"), None);
+        assert_eq!(reasoning_effort_for("claude-sonnet"), None);
+    }
+
+    #[test]
+    fn note_is_appended_to_filled_prompt() {
+        assert_eq!(with_note("Сократи: текст", ""), "Сократи: текст");
+        assert_eq!(with_note("Сократи: текст", "  "), "Сократи: текст");
+        assert_eq!(
+            with_note("Сократи: текст", "короче и вежливее"),
+            "Сократи: текст\n\nДополнительное указание от пользователя: короче и вежливее"
+        );
+    }
+
+    /// Мини HTTP-сервер: отвечает заготовленным JSON по точному пути, иначе 404.
+    fn spawn_server(routes: Vec<(String, String)>) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { break };
+                let mut buffer = [0u8; 4096];
+                let Ok(read) = stream.read(&mut buffer) else { continue };
+                let request = String::from_utf8_lossy(&buffer[..read]).to_string();
+                let path = request
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or_default()
+                    .to_string();
+                let body = routes
+                    .iter()
+                    .find(|(route, _)| *route == path)
+                    .map(|(_, body)| body.clone());
+                let response = match body {
+                    Some(body) => format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    ),
+                    None => "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".into(),
+                };
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        format!("http://127.0.0.1:{}", addr.port())
+    }
+
+    #[test]
+    fn discovers_ollama_by_tags() {
+        let base = spawn_server(vec![(
+            "/api/tags".into(),
+            r#"{"models":[{"name":"llama3:latest"},{"name":"qwen2.5:7b"}]}"#.into(),
+        )]);
+        let result =
+            tauri::async_runtime::block_on(discover(&base, "")).expect("ollama detected");
+        assert_eq!(result.kind, "ollama");
+        assert_eq!(result.models, vec!["llama3:latest", "qwen2.5:7b"]);
+    }
+
+    #[test]
+    fn discovers_openai_compatible_root() {
+        let base = spawn_server(vec![(
+            "/v1/models".into(),
+            r#"{"data":[{"id":"gpt-4o"},{"id":"gpt-4o-mini"}]}"#.into(),
+        )]);
+        let result =
+            tauri::async_runtime::block_on(discover(&base, "secret")).expect("openai");
+        assert_eq!(result.kind, "openai");
+        assert_eq!(result.models, vec!["gpt-4o", "gpt-4o-mini"]);
+    }
+
+    #[test]
+    fn discovers_openai_compatible_with_v1_base() {
+        // LM Studio и подобные: base уже содержит /v1, модели лежат в /v1/models.
+        let base = spawn_server(vec![(
+            "/v1/models".into(),
+            r#"{"data":[{"id":"local-model"}]}"#.into(),
+        )]);
+        let result = tauri::async_runtime::block_on(discover(&format!("{base}/v1"), ""))
+            .expect("openai with /v1 base");
+        assert_eq!(result.kind, "openai");
+        assert_eq!(result.models, vec!["local-model"]);
+    }
+
+    #[test]
+    fn discover_reports_no_api_on_foreign_server() {
+        let base = spawn_server(vec![]);
+        let error = tauri::async_runtime::block_on(discover(&base, "")).expect_err("404");
+        assert!(error.contains("не найден API"), "got: {error}");
+    }
+
+    #[test]
+    fn discover_reports_unreachable() {
+        // Занимаем и сразу освобождаем порт — соединение будет отклонено.
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let error =
+            tauri::async_runtime::block_on(discover(&format!("http://127.0.0.1:{port}"), ""))
+                .expect_err("connection refused");
+        assert!(error.contains("Не удалось подключиться"), "got: {error}");
+    }
 }
