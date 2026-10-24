@@ -1,7 +1,13 @@
+use block2::RcBlock;
 use core_foundation::base::TCFType;
 use core_foundation::boolean::CFBoolean;
 use core_foundation::dictionary::CFDictionary;
 use core_foundation::string::CFString;
+use objc2::runtime::Bool;
+use objc2_av_foundation::{
+    AVAuthorizationStatus, AVCaptureDevice,
+};
+use objc2_foundation::NSString;
 
 use crate::platform::Permissions;
 
@@ -36,10 +42,32 @@ pub fn secure_input() -> bool {
     unsafe { IsSecureEventInputEnabled() }
 }
 
+pub fn microphone() -> bool {
+    let media = NSString::from_str("soun");
+    unsafe {
+        AVCaptureDevice::authorizationStatusForMediaType(&media)
+            == AVAuthorizationStatus::Authorized
+    }
+}
+
+pub fn request_microphone() {
+    let media = NSString::from_str("soun");
+    unsafe {
+        if AVCaptureDevice::authorizationStatusForMediaType(&media)
+            != AVAuthorizationStatus::NotDetermined
+        {
+            return;
+        }
+        let handler = RcBlock::new(|_granted: Bool| {});
+        AVCaptureDevice::requestAccessForMediaType_completionHandler(&media, &handler);
+    }
+}
+
 pub fn current() -> Permissions {
     Permissions {
         accessibility: accessibility(),
         input_monitoring: input_monitoring(),
+        microphone: microphone(),
         secure_input: secure_input(),
     }
 }
@@ -53,6 +81,10 @@ pub fn open_settings(kind: &str) -> Result<(), String> {
         "input" => {
             let _ = request_input_monitoring();
             "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
+        }
+        "microphone" => {
+            request_microphone();
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
         }
         _ => return Err("unknown permission".into()),
     };

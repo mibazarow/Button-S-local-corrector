@@ -131,8 +131,9 @@ cargo build --manifest-path src-tauri/Cargo.toml     # debug-бинарник
 
 ## 7. macOS-специфика
 
-- Accessibility нужен для инъекции, Input Monitoring — для перехвата. Оба
-  проверяются в `platform/macos/permissions.rs`.
+- Accessibility нужен для инъекции, Input Monitoring — для перехвата,
+  микрофон — только для диктовки. Все три проверяются и запрашиваются в
+  `platform/macos/permissions.rs` (запросы идут последовательно).
 - При смене подписи/сертификата TCC-разрешения могут сброситься — это не баг
   приложения; предупреди пользователя.
 - Listen-only event tap, инъекция через CGEvent, anti-loop через

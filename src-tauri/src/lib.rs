@@ -172,10 +172,7 @@ pub fn run() {
             tray::create(&handle, &state)?;
             create_aux_windows(&handle)?;
             engine::start(state.clone());
-            let permissions = platform::permissions();
-            if !permissions.input_monitoring || !permissions.accessibility {
-                platform::request_permissions();
-            }
+            platform::request_permissions();
             hotkeys::register(&handle, &state);
 
             if std::env::args().any(|argument| argument == "--settings") {

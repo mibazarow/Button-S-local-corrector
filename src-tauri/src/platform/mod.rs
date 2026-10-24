@@ -10,6 +10,7 @@ use crate::state::AppState;
 pub struct Permissions {
     pub accessibility: bool,
     pub input_monitoring: bool,
+    pub microphone: bool,
     pub secure_input: bool,
 }
 
@@ -109,12 +110,21 @@ pub fn running_apps() -> Vec<RunningApp> {
 
 #[cfg(target_os = "macos")]
 pub fn request_permissions() {
-    if !macos::permissions::input_monitoring() {
-        let _ = macos::permissions::request_input_monitoring();
-    }
-    if !macos::permissions::accessibility() {
-        macos::permissions::request_accessibility();
-    }
+    std::thread::spawn(|| {
+        if !macos::permissions::accessibility() {
+            macos::permissions::request_accessibility();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(900));
+
+        if !macos::permissions::input_monitoring() {
+            let _ = macos::permissions::request_input_monitoring();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(900));
+
+        if !macos::permissions::microphone() {
+            macos::permissions::request_microphone();
+        }
+    });
 }
 
 #[cfg(not(target_os = "macos"))]

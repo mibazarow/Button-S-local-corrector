@@ -253,7 +253,7 @@
             </button>
           </section>
 
-          {#if !permissionsOk}
+          {#if !permissionsOk || !snapshot.permissions.microphone}
             <section class="card">
               <h3>{t.permissions}</h3>
               <div class="permission">
@@ -278,7 +278,19 @@
                   {/if}
                 </div>
               </div>
+              <div class="permission">
+                <span>{t.microphone}</span>
+                <div class="permission-action">
+                  <span class="pill" class:ok={snapshot.permissions.microphone}>
+                    {snapshot.permissions.microphone ? t.granted : t.denied}
+                  </span>
+                  {#if !snapshot.permissions.microphone}
+                    <button class="btn small" onclick={() => api.openPermission("microphone")}>{t.open}</button>
+                  {/if}
+                </div>
+              </div>
               <p class="hint">{t.permissionsHint}</p>
+              <p class="hint">{t.microphoneHint}</p>
             </section>
           {/if}
 
