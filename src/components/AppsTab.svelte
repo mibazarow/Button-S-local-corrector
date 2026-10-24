@@ -37,7 +37,7 @@
 
   const defaultExcluded = $derived(
     config.layout.excludedApps.filter(
-      (id) => id.toLowerCase() !== "ru.buttons.app",
+      (id) => id.toLowerCase() !== "com.button.s",
     ),
   );
 

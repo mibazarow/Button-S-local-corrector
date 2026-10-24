@@ -266,7 +266,7 @@ impl Default for Layout {
             auto_switch_layout: true,
             delay_ms: 30,
             excluded_apps: vec![
-                "ru.buttons.app".into(),
+                "com.button.s".into(),
                 "com.apple.Terminal".into(),
                 "com.googlecode.iterm2".into(),
                 "dev.warp.Warp-Stable".into(),
@@ -615,7 +615,7 @@ impl Config {
     }
 
     pub fn app_feature_enabled(&self, bundle_id: &str, feature: Feature) -> bool {
-        if bundle_id.eq_ignore_ascii_case("ru.buttons.app") {
+        if bundle_id.eq_ignore_ascii_case("com.button.s") {
             return false;
         }
         if is_password_manager(bundle_id) {

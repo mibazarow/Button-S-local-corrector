@@ -15,7 +15,7 @@
 - Стек: **Tauri 2 + Rust**, **Svelte 5 (runes) + TypeScript**, **vanilla CSS**.
 - Платформа: **только macOS** (13+). Windows/Linux — позже, без изменения
   текущего поведения macOS.
-- Bundle id: `ru.buttons.app`. Приложение трей-онли: `LSUIElement` +
+- Bundle id: `com.button.s`. Приложение трей-онли: `LSUIElement` +
   `Accessory`; не добавлять постоянную иконку в Dock.
 
 ## 2. Источники истины
@@ -94,7 +94,7 @@ cargo build --manifest-path src-tauri/Cargo.toml     # debug-бинарник
   миграция; существующий `config.json` не должен ломаться.
 - Повреждённый конфиг сохраняется в `.json.broken`, приложение стартует на
   дефолтах.
-- Секреты (API-ключи) — только Keychain (`ru.buttons.app`), никогда в
+- Секреты (API-ключи) — только Keychain (`com.button.s`), никогда в
   `config.json`, `.env` или логи.
 
 ### UI
@@ -124,7 +124,7 @@ cargo build --manifest-path src-tauri/Cargo.toml     # debug-бинарник
 - Не читать и не изменять личные файлы пользователя вне репозитория.
 - Не коммитить модели (`.gguf`, `ggml-*.bin`), ключи, историю, дампы и
   пользовательские данные. Они лежат в
-  `~/Library/Application Support/ru.buttons.app/`.
+  `~/Library/Application Support/com.button.s/`.
 - Разрушительные операции (`rm -rf`, `git reset --hard`, `git clean`,
   удаление Keychain/TCC, установка в `/Applications`) — только по явной
   просьбе пользователя.

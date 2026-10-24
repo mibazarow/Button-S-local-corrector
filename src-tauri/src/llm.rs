@@ -649,14 +649,14 @@ pub fn read_key(account: &str) -> Result<String, String> {
     if account.is_empty() {
         return Err("Ключ API не настроен".into());
     }
-    let entry = keyring::Entry::new("ru.buttons.app", account).map_err(|error| error.to_string())?;
+    let entry = keyring::Entry::new("com.button.s", account).map_err(|error| error.to_string())?;
     entry
         .get_password()
         .map_err(|_| "Ключ API не найден в связке ключей".to_string())
 }
 
 pub fn save_key(account: &str, key: &str) -> Result<(), String> {
-    let entry = keyring::Entry::new("ru.buttons.app", account).map_err(|error| error.to_string())?;
+    let entry = keyring::Entry::new("com.button.s", account).map_err(|error| error.to_string())?;
     if key.is_empty() {
         let _ = entry.delete_credential();
         Ok(())

@@ -12,7 +12,9 @@ Whisper → встроенные локальные LLM → релиз 1.0.0). �
 раскладки (`ghbdtn → привет`), опечатки, автозамены символов, капитализация,
 списки, залипший Shift, голосовой ввод (Whisper, локально), LLM-промпты и
 перевод, словари, исключения приложений. Версия 1.0.0, только macOS.
-История, резервные копии и диагностика убраны из интерфейса.
+Bundle id — `com.button.s` (переименован с `ru.buttons.app`); данные, модели,
+Keychain и TCC старого id вычищены. История, резервные копии и диагностика
+убраны из интерфейса.
 
 Стек: **Rust + Tauri 2** (`src-tauri/`), **Svelte 5 (runes) + TypeScript**
 (`src/`). Исходные требования — TZ.md, но реализация местами ушла вперёд —
@@ -31,7 +33,7 @@ npx tauri build                                   # release .app + .dmg
 
 llama.cpp (крейт llama-cpp-2, vendored + cmake) уже скомпилирован в target/ —
 пересборка инкрементальная. Конфиг юзера:
-`~/Library/Application Support/ru.buttons.app/config.json`, модели — рядом в
+`~/Library/Application Support/com.button.s/config.json`, модели — рядом в
 `models/` (whisper) и `models/llm/` (GGUF). Рабочее дерево чистое, релиз 1.0.0
 закоммичен и установлен в `/Applications/BUTTON-S.app`; DMG —
 `src-tauri/target/release/bundle/dmg/BUTTON-S_1.0.0_aarch64.dmg`.
@@ -47,7 +49,7 @@ llama.cpp (крейт llama-cpp-2, vendored + cmake) уже скомпилиро
 первым) и **тянет список моделей с endpoint** — юзер выбирает из списка (или
 вручную, если API не отдаёт). Провайдеров сколько угодно, **активен ровно один**
 (`llm.defaultProvider`), переключение кликом по строке. Ключи — keychain
-(service `ru.buttons.app`, account = `keyRef` вида `provider:{name}`);
+(service `com.button.s`, account = `keyRef` вида `provider:{name}`);
 повторное «Подключить» берёт ключ из keychain. Список моделей кэшируется в
 `Provider.models` → выпадающий список в редакторе промптов.
 
@@ -263,3 +265,7 @@ connection refused. Миграция v2→v3 (пресеты сносятся, �
 7. **24.10 (вечер)** — запись хоткея диктовки прямо в VoiceTab (Escape отменяет,
    конфликтующие сочетания отклоняются); хоткей синхронизирован с
    `config.hotkeys.dictate`.
+8. **24.10 (вечер)** — bundle id сменён на `com.button.s`; удалены старая
+   установка, Application Support (конфиг, словари, промпты, 141 МБ моделей),
+   кэши, LaunchAgent, Keychain-записи и TCC старого id. Модели нужно скачать
+   заново.

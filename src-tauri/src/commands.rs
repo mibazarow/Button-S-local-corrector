@@ -459,7 +459,7 @@ pub fn add_app_by_path(
 ) -> Result<Config, String> {
     let (bundle_id, name) = bundle_info(&PathBuf::from(&path))?;
 
-    if bundle_id.eq_ignore_ascii_case("ru.buttons.app") {
+    if bundle_id.eq_ignore_ascii_case("com.button.s") {
         return Err("Это само приложение BUTTON-S".into());
     }
     if crate::config::is_password_manager(&bundle_id) {
