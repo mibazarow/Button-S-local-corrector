@@ -42,6 +42,9 @@
   {:else if name === "data"}
     <ellipse cx="8" cy="3.5" rx="5.5" ry="2" />
     <path d="M2.5 3.5v9c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2v-9M2.5 8c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2" />
+  {:else if name === "info"}
+    <circle cx="8" cy="8" r="6" />
+    <path d="M8 7.2v4M8 4.7h.01" />
   {:else if name === "check"}
     <path d="M3 8.5 6.5 12 13 4" />
   {:else if name === "plus"}

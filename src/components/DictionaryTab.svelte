@@ -3,6 +3,7 @@
   import { open, save } from "@tauri-apps/plugin-dialog";
   import { api, type UserDictionaryFile } from "../lib/api";
   import { strings, type Strings } from "../lib/i18n";
+  import Callout from "../lib/Callout.svelte";
   import Toggle from "../lib/Toggle.svelte";
 
   let { lang }: { lang: "ru" | "en" } = $props();
@@ -115,6 +116,12 @@
 
   onMount(load);
 </script>
+
+<Callout
+  title={t.dictionaryIntroTitle}
+  text={t.dictionaryIntroText}
+  icon="dictionary"
+/>
 
 <div class="card">
   <h3>{t.dictionaries}</h3>

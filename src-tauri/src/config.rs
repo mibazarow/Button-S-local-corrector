@@ -528,6 +528,8 @@ impl Config {
     }
 
     pub fn normalize(&mut self) {
+        self.privacy.history = false;
+        self.privacy.history_text = false;
         if self.general.ui_language != "ru" && self.general.ui_language != "en" {
             self.general.ui_language = "ru".into();
         }
@@ -638,7 +640,7 @@ impl Config {
     }
 }
 
-fn is_password_manager(bundle_id: &str) -> bool {    const MANAGERS: &[&str] = &[
+pub(crate) fn is_password_manager(bundle_id: &str) -> bool {    const MANAGERS: &[&str] = &[
         "com.1password.1password",
         "com.agilebits.onepassword7",
         "com.bitwarden.desktop",

@@ -263,7 +263,10 @@ export const api = {
   listRunningApps: () => invoke<RunningApp[]>("list_running_apps"),
   setAppRule: (bundleId: string, feature: string, enabled: boolean, name?: string) =>
     invoke<void>("set_app_rule", { bundleId, feature, enabled, name: name ?? null }),
-  removeAppRule: (bundleId: string) => invoke<void>("remove_app_rule", { bundleId }),
+  addAppByPath: (path: string) => invoke<Config>("add_app_by_path", { path }),
+  setAppEnabled: (bundleId: string, enabled: boolean) =>
+    invoke<Config>("set_app_enabled", { bundleId, enabled }),
+  removeAppRule: (bundleId: string) => invoke<Config>("remove_app_rule", { bundleId }),
 
   getPrompts: () => invoke<Prompt[]>("get_prompts"),
   savePrompt: (prompt: Prompt) => invoke<Prompt[]>("save_prompt", { prompt }),
@@ -300,12 +303,16 @@ export const api = {
     invoke<VoiceModelItem[]>("voice_use_model", { id }),
   voiceDownload: (id: string) =>
     invoke<VoiceModelStatus>("voice_download_model", { id }),
+  voiceDeleteModel: (id: string) =>
+    invoke<VoiceModelItem[]>("voice_delete_model", { id }),
   voiceDevices: () => invoke<string[]>("voice_devices"),
 
   llmLocalModels: () => invoke<LocalLlmItem[]>("llm_local_models"),
   llmLocalDownload: (id: string) =>
     invoke<LocalLlmItem[]>("llm_local_download", { id }),
   llmLocalUse: (id: string) => invoke<LocalLlmItem[]>("llm_local_use", { id }),
+  llmLocalDelete: (id: string) =>
+    invoke<LocalLlmItem[]>("llm_local_delete", { id }),
   voiceStart: () => invoke<void>("voice_start"),
   voiceStop: () => invoke<void>("voice_stop"),
   voiceCancel: () => invoke<void>("voice_cancel"),

@@ -341,7 +341,7 @@ fn apply_change(
 
     if auto_switch {
         if let Some(language) = platform::language_for_text(replacement) {
-            platform::switch_layout(language);
+            state.switch_layout(language);
         }
     }
 
@@ -485,7 +485,7 @@ pub fn convert_last_word(state: &AppState) {
 
     if state.config.read().layout.auto_switch_layout {
         if let Some(language) = platform::language_for_text(&decision.text) {
-            platform::switch_layout(language);
+            state.switch_layout(language);
         }
     }
 
@@ -531,7 +531,7 @@ pub fn undo_last(state: &AppState) {
 
     if state.config.read().layout.auto_switch_layout {
         if let Some(language) = platform::language_for_text(&change.original) {
-            platform::switch_layout(language);
+            state.switch_layout(language);
         }
     }
 

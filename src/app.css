@@ -372,6 +372,16 @@ textarea.input {
   color: var(--danger);
 }
 
+.btn.delete-soft {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--danger) 9%, transparent);
+  color: var(--danger);
+}
+
+.btn.delete-soft:hover {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+}
+
 .btn.small {
   padding: 4px 9px;
   font-size: 11px;

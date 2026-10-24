@@ -213,6 +213,16 @@ impl AppState {
         let _ = dictionary.save(&self.dict_path);
     }
 
+    pub fn switch_layout(&self, language: &str) {
+        let language = language.to_string();
+        let app = self.app.read().as_ref().cloned();
+        if let Some(app) = app {
+            let _ = app.run_on_main_thread(move || {
+                platform::switch_layout(&language);
+            });
+        }
+    }
+
     pub fn record_history(
         &self,
         kind: &str,

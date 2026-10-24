@@ -71,6 +71,7 @@ enum Command {
     Stop,
     Cancel,
     Toggle,
+    Unload,
 }
 
 static SENDER: OnceLock<Sender<Command>> = OnceLock::new();
@@ -133,6 +134,49 @@ pub fn list_models(state: &AppState) -> Vec<VoiceModelView> {
 }
 
 /// Переключает активную модель на уже скачанную.
+pub fn delete_model(state: &AppState, id: &str) -> Result<Vec<VoiceModelView>, String> {
+    let spec = VOICE_MODELS
+        .iter()
+        .find(|spec| spec.id == id)
+        .ok_or_else(|| format!("Неизвестная модель: {id}"))?;
+    let path = models_dir(state).join(spec.file);
+    if !path.exists() {
+        return Err("Модель не скачана".into());
+    }
+
+    let active_path = model_path(state);
+    std::fs::remove_file(&path).map_err(|error| error.to_string())?;
+    let _ = std::fs::remove_file(path.with_extension("download"));
+
+    if active_path == path {
+        let replacement = VOICE_MODELS
+            .iter()
+            .filter(|candidate| candidate.id != id)
+            .find(|candidate| {
+                let candidate_path = models_dir(state).join(candidate.file);
+                std::fs::metadata(&candidate_path)
+                    .map(|meta| meta.len() > 10_000_000)
+                    .unwrap_or(false)
+            })
+            .map(|candidate| {
+                models_dir(state)
+                    .join(candidate.file)
+                    .to_string_lossy()
+                    .to_string()
+            });
+
+        let mut config = state.config.write();
+        config.voice.model = replacement.unwrap_or_default();
+        config.save(&state.config_path)?;
+    }
+
+    if let Some(sender) = SENDER.get() {
+        let _ = sender.send(Command::Unload);
+    }
+
+    Ok(list_models(state))
+}
+
 pub fn use_model(state: &AppState, id: &str) -> Result<(), String> {
     let spec = VOICE_MODELS
         .iter()
@@ -224,6 +268,11 @@ fn worker(app: AppHandle, state: Arc<AppState>, receiver: mpsc::Receiver<Command
                 recording = None;
                 hide_hud(&app);
                 state.emit_event("voice-state", json!({ "state": "idle" }));
+            }
+            Ok(Command::Unload) => {
+                if recording.is_none() {
+                    context = None;
+                }
             }
             Ok(Command::Toggle) => {
                 if let Some(active) = recording.take() {
@@ -647,58 +696,6 @@ fn notify_error(state: &AppState, text: &str) {
     state.emit_event("toast", json!({ "kind": "error", "text": text }));
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::Config;
-
-    fn temp_state(tag: &str) -> (AppState, PathBuf) {
-        let dir = std::env::temp_dir().join(format!("button-s-test-{tag}-{}", now_millis()));
-        std::fs::create_dir_all(&dir).expect("create temp dir");
-        let config_path = dir.join("config.json");
-        (AppState::new(Config::default(), config_path.clone()), dir)
-    }
-
-    #[test]
-    fn lists_and_switches_models() {
-        let (state, dir) = temp_state("models");
-
-        // Ничего не скачано: base предлагается по умолчанию, но не активна.
-        let views = list_models(&state);
-        assert_eq!(views.len(), 5);
-        assert!(views.iter().all(|view| !view.downloaded && !view.active));
-
-        // «Скачиваем» tiny как sparse-файл и делаем её активной.
-        let tiny = dir.join(MODEL_DIR).join("ggml-tiny.bin");
-        std::fs::create_dir_all(tiny.parent().unwrap()).unwrap();
-        std::fs::File::create(&tiny)
-            .unwrap()
-            .set_len(11_000_000)
-            .unwrap();
-
-        use_model(&state, "tiny").expect("switch to tiny");
-        let views = list_models(&state);
-        let tiny_view = views.iter().find(|view| view.id == "tiny").unwrap();
-        assert!(tiny_view.downloaded && tiny_view.active);
-        assert_eq!(
-            state.config.read().voice.model,
-            tiny.to_string_lossy().to_string()
-        );
-
-        // Переключение на нескачанную модель должно падать.
-        assert!(use_model(&state, "small").is_err());
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    fn now_millis() -> u128 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_millis())
-            .unwrap_or(0)
-    }
-}
-
 pub fn audio_devices() -> Vec<String> {
     let host = cpal::default_host();
     let mut devices = Vec::new();
@@ -796,4 +793,75 @@ async fn download_model_inner(
 
     let _ = app.emit("voice-download", json!({ "id": spec.id, "done": true }));
     Ok(model_status(state))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+
+    fn temp_state(tag: &str) -> (AppState, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("button-s-test-{tag}-{}", now_millis()));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let config_path = dir.join("config.json");
+        (AppState::new(Config::default(), config_path.clone()), dir)
+    }
+
+    #[test]
+    fn lists_and_switches_models() {
+        let (state, dir) = temp_state("models");
+
+        let views = list_models(&state);
+        assert_eq!(views.len(), 5);
+        assert!(views.iter().all(|view| !view.downloaded && !view.active));
+
+        let tiny = dir.join(MODEL_DIR).join("ggml-tiny.bin");
+        std::fs::create_dir_all(tiny.parent().unwrap()).unwrap();
+        std::fs::File::create(&tiny)
+            .unwrap()
+            .set_len(11_000_000)
+            .unwrap();
+
+        use_model(&state, "tiny").expect("switch to tiny");
+        let views = list_models(&state);
+        let tiny_view = views.iter().find(|view| view.id == "tiny").unwrap();
+        assert!(tiny_view.downloaded && tiny_view.active);
+        assert_eq!(
+            state.config.read().voice.model,
+            tiny.to_string_lossy().to_string()
+        );
+
+        assert!(use_model(&state, "small").is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn deletes_downloaded_model_and_clears_active() {
+        let (state, dir) = temp_state("delete");
+
+        let tiny = dir.join(MODEL_DIR).join("ggml-tiny.bin");
+        std::fs::create_dir_all(tiny.parent().unwrap()).unwrap();
+        std::fs::File::create(&tiny)
+            .unwrap()
+            .set_len(11_000_000)
+            .unwrap();
+        use_model(&state, "tiny").expect("switch to tiny");
+
+        let views = delete_model(&state, "tiny").expect("delete tiny");
+        let tiny_view = views.iter().find(|view| view.id == "tiny").unwrap();
+        assert!(!tiny_view.downloaded);
+        assert!(!tiny_view.active);
+        assert!(!tiny.exists());
+        assert_eq!(state.config.read().voice.model, "");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn now_millis() -> u128 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis())
+            .unwrap_or(0)
+    }
 }

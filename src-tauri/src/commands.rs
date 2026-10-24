@@ -405,15 +405,108 @@ pub fn remove_app_rule(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
     bundle_id: String,
-) -> Result<(), String> {
-    {
+) -> Result<Config, String> {
+    let config = {
         let mut config = state.config.write();
         config.apps.remove(&bundle_id);
         config.save(&state.config_path)?;
-    }
+        config.clone()
+    };
     state.emit_state();
     tray::refresh(&app, &state);
-    Ok(())
+    Ok(config)
+}
+
+fn bundle_info(path: &std::path::Path) -> Result<(String, String), String> {
+    let info_path = if path.extension().and_then(|value| value.to_str()) == Some("plist") {
+        path.to_path_buf()
+    } else {
+        path.join("Contents").join("Info.plist")
+    };
+
+    let value = plist::Value::from_file(&info_path)
+        .map_err(|_| "Не удалось прочитать приложение. Выберите файл .app".to_string())?;
+    let dictionary = value
+        .as_dictionary()
+        .ok_or("Некорректный Info.plist приложения")?;
+
+    let bundle_id = dictionary
+        .get("CFBundleIdentifier")
+        .and_then(|value| value.as_string())
+        .filter(|value| !value.trim().is_empty())
+        .ok_or("У приложения нет bundle identifier")?
+        .to_string();
+
+    let name = dictionary
+        .get("CFBundleDisplayName")
+        .or_else(|| dictionary.get("CFBundleName"))
+        .and_then(|value| value.as_string())
+        .map(str::to_string)
+        .or_else(|| {
+            path.file_stem()
+                .map(|value| value.to_string_lossy().to_string())
+        })
+        .unwrap_or_else(|| bundle_id.clone());
+
+    Ok((bundle_id, name))
+}
+
+#[tauri::command]
+pub fn add_app_by_path(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    path: String,
+) -> Result<Config, String> {
+    let (bundle_id, name) = bundle_info(&PathBuf::from(&path))?;
+
+    if bundle_id.eq_ignore_ascii_case("ru.buttons.app") {
+        return Err("Это само приложение BUTTON-S".into());
+    }
+    if crate::config::is_password_manager(&bundle_id) {
+        return Err("Менеджеры паролей всегда исключены".into());
+    }
+
+    let config = {
+        let mut config = state.config.write();
+        if config.app_excluded(&bundle_id) {
+            return Err("Это приложение уже исключено по умолчанию".into());
+        }
+        let rules = config.apps.entry(bundle_id).or_default();
+        rules.name = Some(name);
+        config.save(&state.config_path)?;
+        config.clone()
+    };
+
+    state.emit_state();
+    tray::refresh(&app, &state);
+    Ok(config)
+}
+
+#[tauri::command]
+pub fn set_app_enabled(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    bundle_id: String,
+    enabled: bool,
+) -> Result<Config, String> {
+    let config = {
+        let mut config = state.config.write();
+        let rules = config.apps.entry(bundle_id).or_default();
+        rules.layout = Some(enabled);
+        rules.typos = Some(enabled);
+        rules.voice = Some(enabled);
+        rules.llm = Some(enabled);
+        rules.replacements = Some(enabled);
+        rules.capitalization = Some(enabled);
+        rules.lists = Some(enabled);
+        rules.shift_fix = Some(enabled);
+        config.save(&state.config_path)?;
+        config.clone()
+    };
+
+    state.emit_state();
+    tray::refresh(&app, &state);
+    Ok(config)
 }
 
 #[tauri::command]
@@ -632,6 +725,14 @@ pub async fn llm_local_download(
 }
 
 #[tauri::command]
+pub fn llm_local_delete(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+) -> Result<Vec<llm_local::LocalLlmView>, String> {
+    llm_local::delete_local_model(&state, &id)
+}
+
+#[tauri::command]
 pub fn llm_local_use(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
@@ -770,6 +871,14 @@ pub async fn voice_download_model(
 }
 
 #[tauri::command]
+pub fn voice_delete_model(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+) -> Result<Vec<voice::VoiceModelView>, String> {
+    voice::delete_model(&state, &id)
+}
+
+#[tauri::command]
 pub fn voice_devices() -> Vec<String> {
     voice::audio_devices()
 }
@@ -800,4 +909,36 @@ pub fn copy_to_clipboard(text: String) -> Result<(), String> {
     clipboard
         .set_text(text)
         .map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bundle_info;
+
+    #[test]
+    fn reads_bundle_identifier_and_name() {
+        let dir = std::env::temp_dir().join(format!(
+            "button-s-bundle-test-{}",
+            std::process::id()
+        ));
+        let contents = dir.join("Contents");
+        std::fs::create_dir_all(&contents).unwrap();
+        let info = contents.join("Info.plist");
+
+        let mut dictionary = plist::Dictionary::new();
+        dictionary.insert(
+            "CFBundleIdentifier".into(),
+            "com.example.TestApp".into(),
+        );
+        dictionary.insert("CFBundleDisplayName".into(), "Test App".into());
+        plist::Value::Dictionary(dictionary)
+            .to_file_xml(&info)
+            .unwrap();
+
+        let (bundle_id, name) = bundle_info(&dir).unwrap();
+        assert_eq!(bundle_id, "com.example.TestApp");
+        assert_eq!(name, "Test App");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

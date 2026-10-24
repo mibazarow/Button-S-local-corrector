@@ -74,6 +74,9 @@ const ru = {
   footer: "BUTTON-S работает в строке меню. Настройки можно открыть в любой момент.",
 
   // Голос
+  voiceIntroTitle: "Как работает диктовка",
+  voiceIntroText:
+    "Нажмите {hotkey} в любом приложении и говорите — текст появится там, где стоит курсор. Сначала скачайте модель: она работает на этом Mac, аудио не уходит в интернет.",
   asrModel: "Модели распознавания",
   modelsHint:
     "Все модели работают локально и понимают русский и английский. Аудио не покидает компьютер.",
@@ -124,6 +127,9 @@ const ru = {
   vadEnd: "Пауза завершения, мс",
 
   // Словарь
+  dictionaryIntroTitle: "Зачем нужен словарь",
+  dictionaryIntroText:
+    "Добавьте имена, термины и названия, которые BUTTON-S не должен исправлять. Слова отсюда важнее автозамены и исправления опечаток. Можно добавить слово из выделения.",
   dictionaries: "Словари",
   wordsUnit: "слов",
   newDictionary: "Новый словарь",
@@ -147,6 +153,9 @@ const ru = {
   importFormats: "Поддерживаются .txt, .csv и .json",
 
   // Замены
+  rulesIntroTitle: "Как работают автозамены",
+  rulesIntroText:
+    "Слева — что вы печатаете, справа — что появится. «Сразу» срабатывает по ходу набора, «пробел» — после слова. Встроенные правила можно менять и дополнять.",
   replacements: "Автозамены",
   builtin: "Встроенные",
   colInput: "Ввод",
@@ -160,7 +169,22 @@ const ru = {
     "Сначала применяются автозамены, затем опечатки и только потом раскладка.",
 
   // Приложения
+  appsIntroTitle: "Отключение в отдельных приложениях",
+  appsIntroText:
+    "Здесь можно выключить BUTTON-S в конкретных программах — например, в банке, редакторе кода или игре. Нажмите «Обзор», выберите приложение; по умолчанию оно сразу включено.",
   appsTitle: "Приложения",
+  appsSubtitle: "Список ваших приложений. По умолчанию пуст.",
+  addApp: "Обзор…",
+  opening: "Открываем…",
+  pickAppTitle: "Выберите приложение",
+  appsEmptyTitle: "Пока ни одного приложения",
+  appsEmptyHint:
+    "Нажмите «Обзор» и выберите .app — например, из папки «Программы».",
+  appOn: "Включено",
+  appOff: "Выключено",
+  removeFromList: "Убрать из списка",
+  excludedHint:
+    "Эти приложения исключены всегда: терминалы и менеджеры паролей. Их нельзя включить — это защита.",
   appsHint:
     "Выключите функции для конкретных приложений. Терминалы и менеджеры паролей исключены по умолчанию.",
   noApps: "Нет запущенных приложений",
@@ -205,12 +229,19 @@ const ru = {
   exportCsvHint: "Файл со всеми событиями истории",
 
   // ИИ — провайдеры
-  providersTitle: "LM-провайдеры",
+  aiIntroTitle: "Зачем здесь ИИ",
+  aiIntroText:
+    "ИИ умеет переписать, сократить, исправить или перевести выделенный текст. Ему нужен «движок» — провайдер. Облачный работает сразу после подключения ключа, локальный — бесплатно и без интернета после скачивания модели.",
+  providersTitle: "Облачные провайдеры",
   providersHint:
-    "Любой OpenAI-совместимый сервер, Ollama или Anthropic. Ключи хранятся в связке ключей macOS.",
+    "Подключите сервис по API-ключу: OpenAI, Anthropic, Ollama или совместимый. Ключ хранится в связке ключей macOS, а текст запроса уходит только в выбранный сервис.",
   noProviders: "Облачных провайдеров нет",
   noProvidersHint:
-    "Можно пользоваться локальной моделью выше или добавить свой endpoint — они будут соседями в этом списке, переключение одним кликом.",
+    "Можно не подключать облако: ниже есть бесплатные локальные модели. Или добавьте свой endpoint, если он у вас уже есть.",
+  localSectionTitle: "Локальные модели",
+  localSectionHint:
+    "Бесплатная альтернатива облаку: модель скачивается один раз и работает на этом Mac без интернета. Занимает от 250 МБ до 2,5 ГБ. Если не знаете, что выбрать, начните с Qwen3 1.7B.",
+  localIsActive: "Используется сейчас",
   addProvider: "Добавить провайдера",
   activeProvider: "Активный",
   makeActive: "Сделать активным",
@@ -282,7 +313,7 @@ const ru = {
   errModel: "Выберите модель",
 
   // ИИ — перевод
-  translateTitle: "Перевод",
+  translateTitle: "Перевод текста",
   translateOutput: "Способ вывода",
   translateOutputHint: "Выделите текст и нажмите кнопку или хоткей",
   outputReplace: "Заменить выделение",
@@ -292,12 +323,25 @@ const ru = {
   translateEn: "Перевести на английский",
   translateRu: "Перевести на русский",
   translateHint:
-    "Перевод выполняется через активного провайдера. С локальным сервером работает офлайн.",
+    "Выделите текст и нажмите кнопку или хоткей. Перевод идёт через активный провайдер: облачный или локальный.",
 
   // ИИ — промпты
-  promptsTitle: "Промпты",
-  newPrompt: "Новый",
-  promptNamePlaceholder: "Название",
+  promptsTitle: "Действия с текстом",
+  promptsSubtitle: "Готовые команды для ИИ — и ваши собственные.",
+  promptsIntroTitle: "Как пользоваться действиями",
+  promptsIntroText:
+    "Выделите текст в любом приложении и нажмите «Запустить» (или назначьте хоткей). ИИ вернёт результат: по умолчанию он заменит выделение. Готовые действия можно менять, а свои — добавлять.",
+  newPrompt: "Новое действие",
+  promptNameLabel: "Название",
+  promptNamePlaceholder: "Например: Сделать короче",
+  promptOutputLabel: "Куда выводить результат",
+  promptHotkeyLabel: "Хоткей (необязательно)",
+  promptTemplateLabel: "Что сделать с текстом",
+  promptTemplateHint:
+    "Пишите обычными словами. {{text}} — место, куда подставится выделенный текст.",
+  promptAdvanced: "Дополнительные настройки",
+  promptBuiltin: "готовая",
+  promptProviderLabel: "Провайдер",
   promptNote: "Свой комментарий",
   promptNotePlaceholder: "Например: короче, вежливее, без канцелярита",
   promptNoteHint:
@@ -307,10 +351,10 @@ const ru = {
   promptModelDefault: "Как у провайдера",
   promptHotkeyPlaceholder: "Хоткей (опционально)",
   run: "Запустить",
-  choosePrompt: "Выберите промпт слева",
+  choosePrompt: "Выберите действие слева",
   promptVars:
     "Переменные: {{text}}, {{selection}}, {{clipboard}}, {{language}}, {{app}}, {{date}}",
-  promptSaved: "Промпт сохранён",
+  promptSaved: "Действие сохранено",
   llmPending: "Запрос к ИИ…",
   translatePending: "Перевод…",
   temperature: "Температура",
@@ -436,6 +480,9 @@ const en: Strings = {
   footer: "BUTTON-S lives in the menu bar. Open settings at any time.",
 
   // Voice
+  voiceIntroTitle: "How dictation works",
+  voiceIntroText:
+    "Press {hotkey} in any app and speak — the text appears at the cursor. First download a model: it runs on this Mac and audio never leaves the computer.",
   asrModel: "Recognition models",
   modelsHint:
     "All models run locally and understand Russian and English. Audio never leaves the computer.",
@@ -486,6 +533,9 @@ const en: Strings = {
   vadEnd: "End-of-speech pause, ms",
 
   // Dictionary
+  dictionaryIntroTitle: "What the dictionary is for",
+  dictionaryIntroText:
+    "Add names, terms and titles that BUTTON-S must never correct. Dictionary words take priority over autocorrect and typo fix. You can add a word straight from the selection.",
   dictionaries: "Dictionaries",
   wordsUnit: "words",
   newDictionary: "New dictionary",
@@ -508,6 +558,9 @@ const en: Strings = {
   importFormats: "Supports .txt, .csv and .json",
 
   // Rules
+  rulesIntroTitle: "How replacements work",
+  rulesIntroText:
+    "Left is what you type, right is what appears. “Instant” fires while typing, “space” after the word. You can edit and add your own rules.",
   replacements: "Replacements",
   builtin: "Built-ins",
   colInput: "Input",
@@ -520,7 +573,22 @@ const en: Strings = {
   rulesHint: "Replacements apply first, then typos, then layout correction.",
 
   // Apps
+  appsIntroTitle: "Turning BUTTON-S off in specific apps",
+  appsIntroText:
+    "Here you can disable BUTTON-S in particular programs — a banking app, code editor or game. Press “Browse”, pick an application; it is enabled by default.",
   appsTitle: "Applications",
+  appsSubtitle: "Your list of applications. Empty by default.",
+  addApp: "Browse…",
+  opening: "Opening…",
+  pickAppTitle: "Choose an application",
+  appsEmptyTitle: "No applications yet",
+  appsEmptyHint:
+    "Press “Browse” and pick an .app — for example from the Applications folder.",
+  appOn: "Enabled",
+  appOff: "Disabled",
+  removeFromList: "Remove from list",
+  excludedHint:
+    "These apps are always excluded: terminals and password managers. They cannot be enabled — that is intentional protection.",
   appsHint:
     "Disable features per app. Terminals and password managers are excluded by default.",
   noApps: "No running applications",
@@ -565,12 +633,19 @@ const en: Strings = {
   exportCsvHint: "A file with all history events",
 
   // AI — providers
-  providersTitle: "LM providers",
+  aiIntroTitle: "Why AI is here",
+  aiIntroText:
+    "AI can rewrite, shorten, fix or translate the selected text. It needs an engine — a provider. A cloud provider works as soon as you connect a key; a local model is free and offline after download.",
+  providersTitle: "Cloud providers",
   providersHint:
-    "Any OpenAI-compatible server, Ollama or Anthropic. Keys live in the macOS keychain.",
+    "Connect a service with an API key: OpenAI, Anthropic, Ollama or a compatible one. The key stays in the macOS keychain, and request text goes only to the chosen service.",
   noProviders: "No cloud providers yet",
   noProvidersHint:
-    "Use the local model above or add your own endpoint — they sit side by side in this list, one click to switch.",
+    "You can skip the cloud entirely: free local models are below. Or add your own endpoint if you already have one.",
+  localSectionTitle: "Local models",
+  localSectionHint:
+    "A free alternative to the cloud: download a model once and it runs on this Mac without internet. It takes 250 MB to 2.5 GB. If unsure, start with Qwen3 1.7B.",
+  localIsActive: "In use now",
   addProvider: "Add provider",
   activeProvider: "Active",
   makeActive: "Make active",
@@ -641,7 +716,7 @@ const en: Strings = {
   errModel: "Pick a model",
 
   // AI — translate
-  translateTitle: "Translate",
+  translateTitle: "Translate text",
   translateOutput: "Output",
   translateOutputHint: "Select text and press the button or a hotkey",
   outputReplace: "Replace selection",
@@ -651,12 +726,25 @@ const en: Strings = {
   translateEn: "Translate to English",
   translateRu: "Translate to Russian",
   translateHint:
-    "Translation goes through the active provider. Works offline with a local server.",
+    "Select text and press the button or a hotkey. Translation uses the active provider: cloud or local.",
 
   // AI — prompts
-  promptsTitle: "Prompts",
-  newPrompt: "New",
-  promptNamePlaceholder: "Name",
+  promptsTitle: "Text actions",
+  promptsSubtitle: "Ready-made commands for AI — and your own.",
+  promptsIntroTitle: "How to use text actions",
+  promptsIntroText:
+    "Select text in any app and press “Run” (or assign a hotkey). AI returns the result: by default it replaces the selection. You can edit ready-made actions and add your own.",
+  newPrompt: "New action",
+  promptNameLabel: "Name",
+  promptNamePlaceholder: "For example: Make it shorter",
+  promptOutputLabel: "Where to put the result",
+  promptHotkeyLabel: "Hotkey (optional)",
+  promptTemplateLabel: "What to do with the text",
+  promptTemplateHint:
+    "Write in plain words. {{text}} is where the selected text goes.",
+  promptAdvanced: "Advanced settings",
+  promptBuiltin: "built-in",
+  promptProviderLabel: "Provider",
   promptNote: "Your comment",
   promptNotePlaceholder: "For example: shorter, politer, no legalese",
   promptNoteHint:
@@ -666,10 +754,10 @@ const en: Strings = {
   promptModelDefault: "Same as provider",
   promptHotkeyPlaceholder: "Hotkey (optional)",
   run: "Run",
-  choosePrompt: "Pick a prompt on the left",
+  choosePrompt: "Pick an action on the left",
   promptVars:
     "Variables: {{text}}, {{selection}}, {{clipboard}}, {{language}}, {{app}}, {{date}}",
-  promptSaved: "Prompt saved",
+  promptSaved: "Action saved",
   llmPending: "AI request…",
   translatePending: "Translating…",
   temperature: "Temperature",

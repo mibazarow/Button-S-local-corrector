@@ -18,10 +18,8 @@
   import DictionaryTab from "./components/DictionaryTab.svelte";
   import RulesTab from "./components/RulesTab.svelte";
   import AppsTab from "./components/AppsTab.svelte";
-  import HistoryTab from "./components/HistoryTab.svelte";
   import AiTab from "./components/AiTab.svelte";
   import HotkeysTab from "./components/HotkeysTab.svelte";
-  import DataTab from "./components/DataTab.svelte";
   import Toggle from "./lib/Toggle.svelte";
 
   const view = window.location.hash.replace("#", "") || "main";
@@ -69,10 +67,8 @@
     { id: "dictionary", icon: "dictionary", label: t.tabDictionary },
     { id: "rules", icon: "rules", label: t.tabRules },
     { id: "apps", icon: "apps", label: t.tabApps },
-    { id: "history", icon: "history", label: t.tabHistory },
     { id: "ai", icon: "ai", label: t.tabAi },
     { id: "hotkeys", icon: "hotkeys", label: t.tabHotkeys },
-    { id: "data", icon: "data", label: t.tabData },
   ]);
 
   async function refresh() {
@@ -386,17 +382,13 @@
           <DictionaryTab {lang} />
         {:else if tab === "rules"}
           <RulesTab bind:config {refresh} {lang} />
-        {:else if tab === "apps"}
-          <AppsTab bind:config {refresh} {lang} />
-        {:else if tab === "history"}
-          <HistoryTab {snapshot} {refresh} {lang} />
-        {:else if tab === "ai"}
-          <AiTab bind:config {refresh} {lang} />
-        {:else if tab === "hotkeys"}
-          <HotkeysTab bind:config {refresh} {lang} />
-        {:else if tab === "data"}
-          <DataTab {snapshot} {refresh} {lang} />
-        {/if}
+      {:else if tab === "apps"}
+        <AppsTab bind:config refresh={refresh} lang={lang} />
+      {:else if tab === "ai"}
+        <AiTab bind:config refresh={refresh} lang={lang} />
+      {:else if tab === "hotkeys"}
+        <HotkeysTab bind:config refresh={refresh} lang={lang} />
+      {/if}
       {/if}
     </section>
   </div>

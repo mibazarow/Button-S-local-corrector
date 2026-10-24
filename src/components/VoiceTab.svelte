@@ -8,6 +8,7 @@
     type VoiceModelStatus,
   } from "../lib/api";
   import { strings, prettyCombo, type Strings } from "../lib/i18n";
+  import Callout from "../lib/Callout.svelte";
   import Toggle from "../lib/Toggle.svelte";
 
   let {
@@ -26,6 +27,8 @@
   let voiceState = $state("idle");
   let error = $state("");
   let saved = $state(false);
+  let armedDelete = $state("");
+  let deleteTimer: ReturnType<typeof setTimeout> | undefined;
 
   const modelMeta: Record<string, { name: string; desc: string; pro: string; con: string }> =
     $derived({
@@ -90,6 +93,23 @@
     }
   }
 
+  function armDelete(key: string) {
+    armedDelete = key;
+    clearTimeout(deleteTimer);
+    deleteTimer = setTimeout(() => (armedDelete = ""), 2600);
+  }
+
+  async function removeModel(item: VoiceModelItem) {
+    try {
+      models = await api.voiceDeleteModel(item.id);
+      armedDelete = "";
+      model = await api.voiceStatus();
+      refresh();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
   async function toggleRecording() {
     try {
       if (voiceState === "recording") {
@@ -128,6 +148,12 @@
     };
   });
 </script>
+
+<Callout
+  title={t.voiceIntroTitle}
+  text={t.voiceIntroText.replace("{hotkey}", prettyCombo(config.hotkeys.dictate))}
+  icon="voice"
+/>
 
 <div class="card">
   <h3>{t.asrModel}</h3>
@@ -169,6 +195,18 @@
             <button class="btn primary" onclick={() => download(item)}>
               {t.downloadModel}
             </button>
+          {/if}
+          {#if item.downloaded}
+            {#if armedDelete === `voice:${item.id}`}
+              <button class="btn delete-soft small" onclick={() => removeModel(item)}>
+                {t.delete}?
+              </button>
+            {:else}
+              <button
+                class="btn delete-soft small"
+                onclick={() => armDelete(`voice:${item.id}`)}
+              >{t.delete}</button>
+            {/if}
           {/if}
         </div>
       </div>

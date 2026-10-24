@@ -10,6 +10,7 @@
     type ProviderView,
   } from "../lib/api";
   import { strings, prettyCombo, type Strings } from "../lib/i18n";
+  import Callout from "../lib/Callout.svelte";
   import Icon from "../lib/Icon.svelte";
 
   let {
@@ -77,9 +78,7 @@
     providers.filter((provider) => provider.kind !== "local"),
   );
   const localActive = $derived(config.llm.defaultProvider === "local");
-  const localProviderExists = $derived(providers.some((p) => p.kind === "local"));
   const activeLocalItem = $derived(localModels.find((m) => m.active) ?? null);
-  const anyLocalDownloaded = $derived(localModels.some((m) => m.downloaded));
   const activeLocalName = $derived(
     activeLocalItem
       ? (localModelMeta[activeLocalItem.id]?.name ?? activeLocalItem.id)
@@ -120,6 +119,18 @@
     }
   }
 
+  async function removeLocal(item: LocalLlmItem) {
+    try {
+      localModels = await api.llmLocalDelete(item.id);
+      armedDelete = "";
+      config = await api.getConfig();
+      await load();
+      refresh();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
   // --- Форма провайдера ---------------------------------------------------
   interface ProviderDraft {
     original: string;
@@ -141,7 +152,6 @@
   let providerForm = $state<ProviderDraft | null>(null);
   let armedDelete = $state("");
   let deleteTimer: ReturnType<typeof setTimeout> | undefined;
-  let localExpanded = $state(false);
 
   const kindLabel = (kind: string) =>
     kind === "ollama"
@@ -431,6 +441,8 @@
   });
 </script>
 
+<Callout title={t.aiIntroTitle} text={t.aiIntroText} icon="ai" />
+
 <!-- ======================= Провайдеры ======================= -->
 <div class="card">
   <div class="card-head">
@@ -532,104 +544,6 @@
     </div>
   {:else}
     <div class="provider-list">
-      <!-- Встроенная локальная модель — один из пунктов списка -->
-      <div
-        class="provider-row"
-        class:active={localActive}
-        role="radio"
-        aria-checked={localActive}
-        tabindex="0"
-        onclick={() => {
-          if (localProviderExists && anyLocalDownloaded) makeActive("local");
-          else localExpanded = true;
-        }}
-        onkeydown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            if (localProviderExists && anyLocalDownloaded) makeActive("local");
-            else localExpanded = true;
-          }
-        }}
-      >
-        <span class="radio" class:on={localActive} aria-hidden="true"></span>
-        <div class="provider-info">
-          <div class="provider-title">
-            <b>{t.localProviderName}</b>
-            {#if localActive}
-              <span class="badge ok">{t.activeProvider}</span>
-            {/if}
-            <span class="badge">{t.kindLocal}</span>
-          </div>
-          <div class="provider-meta">
-            {#if activeLocalItem}
-              <span>{activeLocalName}</span>
-            {:else if anyLocalDownloaded}
-              <span>{t.localRowPickHint}</span>
-            {:else}
-              <span>{t.localRowDownloadHint}</span>
-            {/if}
-          </div>
-        </div>
-        <div class="provider-actions">
-          <button
-            class="btn small"
-            onclick={(event) => {
-              event.stopPropagation();
-              localExpanded = !localExpanded;
-            }}
-          >{localExpanded ? t.localRowHide : t.localRowModels}</button>
-        </div>
-      </div>
-
-      {#if localExpanded}
-        <div class="local-panel">
-          <p class="local-panel-scope">{t.localLlmScope}</p>
-          <div class="model-list">
-            {#each localModels as item (item.id)}
-              {@const meta = localModelMeta[item.id] ?? { name: item.id, desc: "", pro: "", con: "" }}
-              <div class="model-row" class:active={item.active}>
-                <div class="model-info">
-                  <div class="model-title">
-                    <b>{meta.name}</b>
-                    <span class="badge muted">{formatSize(item.sizeBytes)}</span>
-                    {#if item.active}
-                      <span class="badge ok">{t.modelActive}</span>
-                    {/if}
-                  </div>
-                  <p class="model-desc">{meta.desc}</p>
-                  {#if meta.pro || meta.con}
-                    <ul class="traits">
-                      {#if meta.pro}<li>{meta.pro}</li>{/if}
-                      {#if meta.con}<li>{meta.con}</li>{/if}
-                    </ul>
-                  {/if}
-                  {#if llmDownloadingId === item.id && llmProgress > 0}
-                    <div class="progress"><span style={`width:${llmProgress}%`}></span></div>
-                  {/if}
-                </div>
-                <div class="model-actions">
-                  {#if item.active}
-                    <span class="pill ok">{t.ready}</span>
-                  {:else if item.downloaded}
-                    <button class="btn" onclick={() => useLocal(item)}>{t.useModel}</button>
-                  {:else if llmDownloadingId}
-                    <button class="btn" disabled>
-                      {t.downloading} {llmDownloadingId === item.id ? `${llmProgress}%` : ""}
-                    </button>
-                  {:else}
-                    <button class="btn primary" onclick={() => downloadLocal(item)}>
-                      {t.downloadModel}
-                    </button>
-                  {/if}
-                </div>
-              </div>
-            {/each}
-          </div>
-          <p class="hint">{t.localLlmDisclaimer}</p>
-          <p class="hint">{t.localLlmHint}</p>
-        </div>
-      {/if}
-
       {#each cloudProviders as provider (provider.name)}
         <div
           class="provider-row"
@@ -695,7 +609,7 @@
             ><Icon name="pencil" size={14} /></button>
             {#if armedDelete === provider.name}
               <button
-                class="btn small danger"
+                class="btn delete-soft small"
                 onclick={(event) => {
                   event.stopPropagation();
                   removeProvider(provider.name);
@@ -703,13 +617,13 @@
               >{t.delete}?</button>
             {:else}
               <button
-                class="icon-btn"
+                class="btn delete-soft small"
                 title={t.delete}
                 onclick={(event) => {
                   event.stopPropagation();
                   armDelete(provider.name);
                 }}
-              ><Icon name="trash" size={14} /></button>
+              >{t.delete}</button>
             {/if}
           </div>
         </div>
@@ -724,6 +638,78 @@
       {/if}
     </div>
   {/if}
+</div>
+
+<!-- ======================= Локальные модели ======================= -->
+<div class="card">
+  <div class="card-head">
+    <div>
+      <h3 style="margin:0">{t.localSectionTitle}</h3>
+      <p class="hint" style="margin-top:4px">{t.localSectionHint}</p>
+    </div>
+    {#if localActive && activeLocalItem}
+      <span class="badge ok">{t.localIsActive} · {activeLocalName}</span>
+    {/if}
+  </div>
+
+  <div class="local-panel">
+    <div class="model-list">
+      {#each localModels as item (item.id)}
+        {@const meta = localModelMeta[item.id] ?? { name: item.id, desc: "", pro: "", con: "" }}
+        <div class="model-row" class:active={item.active}>
+          <div class="model-info">
+            <div class="model-title">
+              <b>{meta.name}</b>
+              <span class="badge muted">{formatSize(item.sizeBytes)}</span>
+              {#if item.active}
+                <span class="badge ok">{t.localIsActive}</span>
+              {/if}
+            </div>
+            <p class="model-desc">{meta.desc}</p>
+            {#if meta.pro || meta.con}
+              <ul class="traits">
+                {#if meta.pro}<li>{meta.pro}</li>{/if}
+                {#if meta.con}<li>{meta.con}</li>{/if}
+              </ul>
+            {/if}
+            {#if llmDownloadingId === item.id && llmProgress > 0}
+              <div class="progress"><span style={`width:${llmProgress}%`}></span></div>
+            {/if}
+          </div>
+          <div class="model-actions">
+            {#if item.active}
+              <span class="pill ok">{t.localIsActive}</span>
+            {:else if item.downloaded}
+              <button class="btn primary" onclick={() => useLocal(item)}>{t.useModel}</button>
+            {:else if llmDownloadingId}
+              <button class="btn" disabled>
+                {t.downloading} {llmDownloadingId === item.id ? `${llmProgress}%` : ""}
+              </button>
+            {:else}
+              <button class="btn primary" onclick={() => downloadLocal(item)}>
+                {t.downloadModel}
+              </button>
+            {/if}
+            {#if item.downloaded}
+              {#if armedDelete === `local:${item.id}`}
+                <button class="btn delete-soft small" onclick={() => removeLocal(item)}>
+                  {t.delete}?
+                </button>
+              {:else}
+                <button
+                  class="btn delete-soft small"
+                  onclick={() => armDelete(`local:${item.id}`)}
+                >{t.delete}</button>
+              {/if}
+            {/if}
+          </div>
+        </div>
+      {/each}
+    </div>
+    <p class="hint">{t.localLlmScope}</p>
+    <p class="hint">{t.localLlmDisclaimer}</p>
+    <p class="hint">{t.localLlmHint}</p>
+  </div>
 </div>
 
 <!-- ======================= Перевод ======================= -->
@@ -747,10 +733,15 @@
   <p class="hint">{t.translateHint}</p>
 </div>
 
-<!-- ======================= Промпты ======================= -->
+<Callout title={t.promptsIntroTitle} text={t.promptsIntroText} icon="ai" />
+
+<!-- ======================= Действия с текстом ======================= -->
 <div class="card">
   <div class="card-head">
-    <h3 style="margin:0">{t.promptsTitle}</h3>
+    <div>
+      <h3 style="margin:0">{t.promptsTitle}</h3>
+      <p class="hint" style="margin-top:3px">{t.promptsSubtitle}</p>
+    </div>
     <button
       class="btn small primary"
       onclick={() => {
@@ -767,6 +758,7 @@
           onclick={() => selectPrompt(prompt.id)}
         >
           <span class="prompt-name">{prompt.name}</span>
+          {#if prompt.builtin}<span class="badge muted">{t.promptBuiltin}</span>{/if}
           {#if prompt.hotkey}<span class="badge muted mono">{prettyCombo(prompt.hotkey)}</span>{/if}
         </button>
       {/each}
@@ -775,15 +767,29 @@
       {#if draft}
         <div class="stack">
           <div class="grid-2">
-            <input class="input" placeholder={t.promptNamePlaceholder} bind:value={draft.name} />
-            <select class="select" bind:value={draft.provider}>
-              <option value="">{t.providerDefault}</option>
-              {#each providers as provider}
-                <option value={provider.name}>{provider.name}</option>
-              {/each}
-            </select>
+            <label class="stack">
+              <span class="small muted">{t.promptNameLabel}</span>
+              <input class="input" placeholder={t.promptNamePlaceholder} bind:value={draft.name} />
+            </label>
+            <label class="stack">
+              <span class="small muted">{t.promptOutputLabel}</span>
+              <select class="select" bind:value={draft.output}>
+                <option value="replace">{t.outputReplace}</option>
+                <option value="popup">{t.outputPopup}</option>
+                <option value="copy">{t.outputCopy}</option>
+                <option value="append">{t.outputAppend}</option>
+              </select>
+            </label>
           </div>
-          <textarea class="input" rows="6" bind:value={draft.template}></textarea>
+          <label class="stack">
+            <span class="small muted">{t.promptHotkeyLabel}</span>
+            <input class="input mono-input" placeholder={t.promptHotkeyPlaceholder} bind:value={draft.hotkey} />
+          </label>
+          <label class="stack">
+            <span class="small muted">{t.promptTemplateLabel}</span>
+            <textarea class="input" rows="5" bind:value={draft.template}></textarea>
+            <span class="small muted">{t.promptTemplateHint}</span>
+          </label>
           <label class="stack note-field">
             <span class="small muted">{t.promptNote}</span>
             <input
@@ -793,35 +799,44 @@
             />
             <span class="small muted">{t.promptNoteHint}</span>
           </label>
-          <div class="grid-2">
-            <select class="select" bind:value={draft.model}>
-              <option value="">{t.promptModelDefault}</option>
-              {#each promptModelOptions(draft.provider) as model}
-                <option value={model}>{model}</option>
-              {/each}
-            </select>
-            <select class="select" bind:value={draft.output}>
-              <option value="replace">{t.outputReplace}</option>
-              <option value="popup">{t.outputPopup}</option>
-              <option value="copy">{t.outputCopy}</option>
-              <option value="append">{t.outputAppend}</option>
-            </select>
-          </div>
-          <div class="inline">
-            <input class="input grow mono-input" placeholder={t.promptHotkeyPlaceholder} bind:value={draft.hotkey} />
-            <label class="inline temp-field">
-              <span class="small muted">{t.temperature}</span>
-              <input
-                class="input"
-                type="number"
-                min="0"
-                max="2"
-                step="0.1"
-                style="width:76px"
-                bind:value={draft.temperature}
-              />
-            </label>
-          </div>
+          <details class="advanced">
+            <summary>{t.promptAdvanced}</summary>
+            <div class="stack" style="margin-top:8px">
+              <div class="grid-2">
+                <label class="stack">
+                  <span class="small muted">{t.promptProviderLabel}</span>
+                  <select class="select" bind:value={draft.provider}>
+                    <option value="">{t.providerDefault}</option>
+                    {#each providers as provider}
+                      <option value={provider.name}>{provider.name}</option>
+                    {/each}
+                  </select>
+                </label>
+                <label class="stack">
+                  <span class="small muted">{t.modelLabel}</span>
+                  <select class="select" bind:value={draft.model}>
+                    <option value="">{t.promptModelDefault}</option>
+                    {#each promptModelOptions(draft.provider) as model}
+                      <option value={model}>{model}</option>
+                    {/each}
+                  </select>
+                </label>
+              </div>
+              <label class="inline temp-field">
+                <span class="small muted">{t.temperature}</span>
+                <input
+                  class="input"
+                  type="number"
+                  min="0"
+                  max="2"
+                  step="0.1"
+                  style="width:76px"
+                  bind:value={draft.temperature}
+                />
+              </label>
+              <p class="hint">{t.promptVars}</p>
+            </div>
+          </details>
           <div class="inline">
             <button class="btn primary" onclick={savePrompt}>{t.save}</button>
             {#if draft.id}
@@ -831,7 +846,6 @@
               {/if}
             {/if}
           </div>
-          <p class="hint">{t.promptVars}</p>
         </div>
       {:else}
         <div class="empty">{t.choosePrompt}</div>
@@ -863,13 +877,6 @@
     border-radius: 11px;
     padding: 12px;
     background: color-mix(in srgb, var(--field) 55%, var(--card));
-  }
-
-  .local-panel-scope {
-    margin: 0 0 4px;
-    font-size: 12px;
-    line-height: 1.45;
-    color: var(--muted);
   }
 
   .empty-state.compact {
@@ -1089,6 +1096,18 @@
 
   .temp-field {
     gap: 6px;
+  }
+
+  .advanced {
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+  }
+
+  .advanced summary {
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
   }
 
   .note-field {

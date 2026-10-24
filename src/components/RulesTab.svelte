@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api, type Config, type Replacement } from "../lib/api";
   import { strings, type Strings } from "../lib/i18n";
+  import Callout from "../lib/Callout.svelte";
   import Toggle from "../lib/Toggle.svelte";
 
   let {
@@ -62,6 +63,12 @@
     persist();
   }
 </script>
+
+<Callout
+  title={t.rulesIntroTitle}
+  text={t.rulesIntroText}
+  icon="rules"
+/>
 
 <div class="card">
   <div class="inline" style="justify-content:space-between;margin-bottom:6px">

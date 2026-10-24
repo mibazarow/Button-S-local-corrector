@@ -78,7 +78,7 @@ pub fn convert_selection(state: &AppState) -> Result<(), String> {
         );
         if state.config.read().layout.auto_switch_layout {
             if let Some(language) = platform::language_for_text(&converted) {
-                platform::switch_layout(language);
+                state.switch_layout(language);
             }
         }
         return Ok(());
@@ -108,7 +108,7 @@ pub fn convert_selection(state: &AppState) -> Result<(), String> {
     );
     if state.config.read().layout.auto_switch_layout {
         if let Some(language) = platform::language_for_text(&decision.text) {
-            platform::switch_layout(language);
+            state.switch_layout(language);
         }
     }
     Ok(())

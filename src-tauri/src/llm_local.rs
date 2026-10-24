@@ -113,14 +113,17 @@ fn file_size(path: &std::path::Path) -> u64 {
 
 /// Каталог моделей: скачана ли, активна ли (провайдер local указывает на неё).
 pub fn list_local_models(state: &AppState) -> Vec<LocalLlmView> {
-    let active_model = state
-        .config
-        .read()
-        .llm
-        .providers
-        .get(LOCAL_PROVIDER)
-        .filter(|provider| provider.kind == "local")
-        .map(|provider| provider.model.clone());
+    let config = state.config.read();
+    let active_model = if config.llm.default_provider == LOCAL_PROVIDER {
+        config
+            .llm
+            .providers
+            .get(LOCAL_PROVIDER)
+            .filter(|provider| provider.kind == "local")
+            .map(|provider| provider.model.clone())
+    } else {
+        None
+    };
     LOCAL_LLM_MODELS
         .iter()
         .map(|spec| {
@@ -162,8 +165,48 @@ pub fn use_local_model(state: &AppState, id: &str) -> Result<(), String> {
         return Err("Модель не скачана".into());
     }
     ensure_local_provider(state, id)?;
+    {
+        let mut config = state.config.write();
+        config.llm.default_provider = LOCAL_PROVIDER.into();
+        config.save(&state.config_path)?;
+    }
     unload();
     Ok(())
+}
+
+pub fn delete_local_model(
+    state: &AppState,
+    id: &str,
+) -> Result<Vec<LocalLlmView>, String> {
+    let item = spec(id)?;
+    let path = dir_from_state(state).join(item.file);
+    if !path.exists() {
+        return Err("Модель не скачана".into());
+    }
+
+    std::fs::remove_file(&path).map_err(|error| error.to_string())?;
+    let _ = std::fs::remove_file(path.with_extension("download"));
+
+    {
+        let mut config = state.config.write();
+        let local_matches = config
+            .llm
+            .providers
+            .get(LOCAL_PROVIDER)
+            .map(|provider| provider.model == id)
+            .unwrap_or(false);
+
+        if local_matches {
+            config.llm.providers.remove(LOCAL_PROVIDER);
+            if config.llm.default_provider == LOCAL_PROVIDER {
+                config.llm.default_provider = String::new();
+            }
+            config.save(&state.config_path)?;
+        }
+    }
+
+    unload();
+    Ok(list_local_models(state))
 }
 
 pub async fn download_local_model(
