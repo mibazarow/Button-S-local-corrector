@@ -33,7 +33,7 @@
 - После значимой фичи, архитектурного решения, миграции или смены контракта —
   **обнови `.internal/context.md`** (кратко, без истории).
 - Не создавай новые `.md` в корне без просьбы. Публичная документация —
-  `README.md`, `LICENSE.md`, `SECURITY.md`, `CONTRIBUTING.md`,
+  `README.md`, `UPDATES.md`, `LICENSE.md`, `SECURITY.md`, `CONTRIBUTING.md`,
   `CODE_OF_CONDUCT.md`, `NOTICE.txt` и этот файл; внутренние — в `.internal/`.
 - В `.internal/context.md` и `.internal/TZ.md` не писать секреты, ключи, реальные
   данные пользователя и личные пути.
