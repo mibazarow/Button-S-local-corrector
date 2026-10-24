@@ -1,7 +1,8 @@
 # CONTEXT.md — BUTTON-S: состояние проекта для быстрого въезда
 
-Обновлено: 2026-10-24, после трёх сессий (редизайн+провайдеры → каталог Whisper →
-встроенные локальные LLM). Читать этот файл первым; исходные требования — TZ.md.
+Обновлено: 2026-10-24, после четырёх сессий (редизайн+провайдеры → каталог
+Whisper → встроенные локальные LLM → релиз 1.0.0). Читать этот файл первым;
+исходные требования — TZ.md.
 
 ---
 
@@ -21,16 +22,18 @@
 ```bash
 npm run check        # svelte-check — 0 ошибок
 npm run build        # vite build — чисто
-cargo test --manifest-path src-tauri/Cargo.toml   # 31 тест, все зелёные
+cargo test --manifest-path src-tauri/Cargo.toml   # 33 теста, все зелёные
 cargo build --manifest-path src-tauri/Cargo.toml  # debug-бинарь ~58 МБ
 ./src-tauri/target/debug/button-s --settings      # запуск с окном настроек
+npx tauri build                                   # release .app + .dmg
 ```
 
 llama.cpp (крейт llama-cpp-2, vendored + cmake) уже скомпилирован в target/ —
 пересборка инкрементальная. Конфиг юзера:
 `~/Library/Application Support/ru.buttons.app/config.json`, модели — рядом в
-`models/` (whisper) и `models/llm/` (GGUF). **Ничего не закоммичено** — все
-изменения трёх сессий лежат в рабочей директории (28 файлов).
+`models/` (whisper) и `models/llm/` (GGUF). Рабочее дерево чистое, релиз 1.0.0
+закоммичен и установлен в `/Applications/BUTTON-S.app`; DMG —
+`src-tauri/target/release/bundle/dmg/BUTTON-S_1.0.0_aarch64.dmg`.
 
 ## 3. Ключевые решения (главное, что нужно знать)
 
@@ -190,13 +193,19 @@ connection refused. Миграция v2→v3 (пресеты сносятся, �
   приёмка за пользователем.
 - **Реальная генерация локальной LLM не проверена** — нужно скачать хотя бы
   Gemma и запустить промпт из приложения.
-- **Release-сборка не гонялась** (debug 58 МБ; release с lto/strip меньше) —
-  сделать перед дистрибуцией.
+- **Релиз 1.0.0 собран и установлен** в `/Applications/BUTTON-S.app` (Apple
+  Development, hardened runtime, без нотаризации). В `[profile.release]` явно
+  стоит `strip = false`: на Xcode 27 + текущем rustc дефолтный
+  `strip=debuginfo` даёт proc-macro dylib с `mis-aligned LINKEDIT string pool`,
+  и dyld не может их загрузить (`can't find crate for *_derive`). С
+  `strip = false` default `npx tauri build` работает без env-хака. Бинарник
+  ~16 МБ.
+- После переустановки/переподписи TCC-разрешения могут потребовать повторной
+  выдачи — это ожидаемо.
 - Перевод идёт только через активного провайдера; локальный Opus-MT/NLLB не
   реализован (идея из TZ §FR-6.2).
 - Стриминг LLM в попап (FR-5.8) не реализован; отмена длинного запроса — нет.
 - Запись хоткея промпта — текстовое поле (не capture клавиш).
-- Коммит не делался (юзер не просил): 28 файлов в рабочей директории.
 
 ## 8. Хронология сессий (кратко)
 
@@ -207,3 +216,5 @@ connection refused. Миграция v2→v3 (пресеты сносятся, �
 3. **24.10 (день)** — встроенные локальные LLM на llama.cpp (3 модели, ленивая
    загрузка/выгрузка, `<think>`-strip), local-провайдер как первый пункт
    списка, пояснение «для чего ИИ» + дисклеймер, тесты 31.
+4. **24.10 (день)** — релиз 1.0.0: версии во всех манифестах, release-сборка,
+   фикс `strip`-профиля под Xcode 27, установка в `/Applications`, коммит.

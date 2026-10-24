@@ -43,4 +43,4 @@ objc2-app-kit = { version = "0.3", features = ["NSWorkspace", "NSRunningApplicat
 codegen-units = 1
 lto = true
 opt-level = "s"
-strip = true
+strip = false
