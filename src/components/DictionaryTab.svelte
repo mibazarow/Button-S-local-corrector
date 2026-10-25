@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { open, save } from "@tauri-apps/plugin-dialog";
-  import { api, type UserDictionaryFile } from "../lib/api";
+  import { api, type Language, type UserDictionaryFile } from "../lib/api";
   import { strings, type Strings } from "../lib/i18n";
   import Callout from "../lib/Callout.svelte";
 
@@ -10,6 +10,7 @@
 
   let dictionaries = $state(null) as UserDictionaryFile | null;
   let word = $state("");
+  let language = $state<Language>("ru");
   let error = $state("");
   let status = $state("");
 
@@ -43,19 +44,11 @@
     setTimeout(() => (status = ""), 1500);
   }
 
-  function languageOf(value: string): string {
-    return /[А-Яа-яЁё]/.test(value) ? "ru" : "en";
-  }
-
   async function add() {
     const value = word.trim();
     if (!value) return;
     try {
-      dictionaries = await api.addWord(
-        dictionaryId,
-        value,
-        languageOf(value),
-      );
+      dictionaries = await api.addWord(dictionaryId, value, language);
       word = "";
     } catch (e) {
       error = String(e);
@@ -117,6 +110,10 @@
         if (event.key === "Enter") add();
       }}
     />
+    <select class="select" bind:value={language}>
+      <option value="ru">{t.langRu}</option>
+      <option value="en">{t.langEn}</option>
+    </select>
     <button class="btn primary" onclick={add}>{t.add}</button>
     <button class="btn" onclick={pickImportFile}>{t.importBtn}</button>
     <button class="btn" onclick={pickExportFile}>{t.exportBtn}</button>
@@ -142,7 +139,7 @@
         {#each allWords as entry (entry.word)}
           <tr>
             <td>{entry.word}</td>
-            <td class="muted">{entry.language}</td>
+            <td class="muted">{entry.language.toUpperCase()}</td>
             <td style="text-align:right">
               <button
                 class="btn delete-soft small"

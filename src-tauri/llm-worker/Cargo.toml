@@ -9,7 +9,14 @@ name = "button-s-llm"
 path = "src/main.rs"
 
 [dependencies]
-llama-cpp-2 = "0.1.160"
 llama-cpp-sys-2 = "0.1.160"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# Vulkan is the cross-platform GPU backend; CUDA can be added later as a separate feature.
+
+[target.'cfg(target_os = "macos")'.dependencies]
+llama-cpp-2 = "0.1.160"
+
+[target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
+llama-cpp-2 = { version = "0.1.160", features = ["vulkan"] }

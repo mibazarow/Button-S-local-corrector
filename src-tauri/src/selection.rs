@@ -12,14 +12,14 @@ use crate::llm;
 use crate::platform::{self, SelectionFailure};
 use crate::state::{AppState, SelectionCapture};
 
-const ICON_SIZE: f64 = 40.0;
 const MENU_WIDTH: f64 = 300.0;
 const MENU_HEIGHT: f64 = 430.0;
+const MENU_GAP: f64 = 0.0;
 const EDGE_MARGIN: f64 = 8.0;
 const POLL_INTERVAL: Duration = Duration::from_millis(320);
 const MENU_WATCHDOG: Duration = Duration::from_secs(30);
-const HIDE_SUPPRESS: Duration = Duration::from_millis(1200);
-const RESULT_SUPPRESS: Duration = Duration::from_millis(1500);
+const TRAY_SHOW_DELAY: Duration = Duration::from_millis(180);
+const HIDE_DELAY: Duration = Duration::from_millis(650);
 const ACTIVATION_TIMEOUT: Duration = Duration::from_millis(1500);
 const ACTIVATION_SETTLE: Duration = Duration::from_millis(120);
 const CLIPBOARD_PROBE_TOTAL: Duration = Duration::from_millis(320);
@@ -42,19 +42,16 @@ impl SelectionSource {
 
 struct FallbackSelection {
     text: String,
-    anchor: (f64, f64),
     bundle_id: String,
     activity: u64,
 }
 
 pub fn start(app: AppHandle, state: Arc<AppState>) {
     thread::spawn(move || {
-        let mut candidate: Option<String> = None;
         let mut down_pos: Option<(f64, f64)> = None;
         let mut dragged_poll = false;
         let mut fallback: Option<FallbackSelection> = None;
         let mut last_reason: Option<String> = None;
-        let mut last_dismiss_gen = state.selection_dismiss_gen.load(Ordering::Relaxed);
 
         loop {
             thread::sleep(POLL_INTERVAL);
@@ -66,26 +63,14 @@ pub fn start(app: AppHandle, state: Arc<AppState>) {
                     None => true,
                 };
                 if stuck {
-                    *state.selection_menu_since.lock() = None;
-                    state.selection_menu_open.store(false, Ordering::Relaxed);
-                } else {
-                    candidate = None;
-                    continue;
+                    hide_menu(&app, &state);
                 }
-            }
-
-            let dismiss_gen = state.selection_dismiss_gen.load(Ordering::Relaxed);
-            if dismiss_gen != last_dismiss_gen {
-                last_dismiss_gen = dismiss_gen;
-                candidate = None;
-                fallback = None;
                 continue;
             }
 
             if state.paused.load(Ordering::Relaxed) || platform::secure_input() {
-                candidate = None;
                 fallback = None;
-                hide(&app, &state, false);
+                clear_capture(&state);
                 continue;
             }
 
@@ -103,13 +88,8 @@ pub fn start(app: AppHandle, state: Arc<AppState>) {
                     _ => {}
                 }
 
-                candidate = None;
                 fallback = None;
-                if state.selection_visible.load(Ordering::Relaxed) {
-                    hide(&app, &state, true);
-                } else {
-                    *state.selection_dismissed.lock() = None;
-                }
+                clear_capture(&state);
                 continue;
             }
             let polled_drag_release = dragged_poll;
@@ -118,18 +98,14 @@ pub fn start(app: AppHandle, state: Arc<AppState>) {
             let released = tapped_drag_release || polled_drag_release;
 
             let Some(frontmost) = platform::frontmost_app_info() else {
-                candidate = None;
                 fallback = None;
-                hide(&app, &state, false);
+                clear_capture(&state);
                 continue;
             };
 
             if frontmost.bundle_id.eq_ignore_ascii_case("com.button.s") {
-                candidate = None;
                 fallback = None;
-                if state.selection_visible.load(Ordering::Relaxed) {
-                    hide(&app, &state, false);
-                }
+                clear_capture(&state);
                 continue;
             }
 
@@ -138,9 +114,8 @@ pub fn start(app: AppHandle, state: Arc<AppState>) {
                 .read()
                 .app_feature_enabled(&frontmost.bundle_id, Feature::Llm);
             if !allowed {
-                candidate = None;
                 fallback = None;
-                hide(&app, &state, false);
+                clear_capture(&state);
                 continue;
             }
 
@@ -153,16 +128,16 @@ pub fn start(app: AppHandle, state: Arc<AppState>) {
                 fallback = None;
             }
 
-            let (text, anchor, source) = match platform::selection_info() {
+            let (text, source) = match platform::selection_info() {
                 Ok(info) => {
                     fallback = None;
+                    let _ = info.end;
                     let text = info.text.trim_end().to_string();
                     if text.trim().is_empty() {
-                        candidate = None;
-                        hide(&app, &state, false);
+                        clear_capture(&state);
                         continue;
                     }
-                    (text, info.end, SelectionSource::Ax)
+                    (text, SelectionSource::Ax)
                 }
                 Err(failure) => {
                     let reason_key = format!("{} app={}", failure.reason, frontmost.bundle_id);
@@ -174,22 +149,14 @@ pub fn start(app: AppHandle, state: Arc<AppState>) {
                         last_reason = Some(reason_key);
                     }
 
-                    let suppressed = matches!(
-                        *state.selection_suppress_until.lock(),
-                        Some(until) if Instant::now() < until
-                    );
                     if released
                         && fallback.is_none()
-                        && !state.selection_visible.load(Ordering::Relaxed)
-                        && !state.selection_menu_open.load(Ordering::Relaxed)
-                        && !suppressed
                         && fallback_target_editable(&failure, &frontmost.bundle_id)
                     {
-                        if let Some((text, anchor)) = probe_selection_via_clipboard() {
+                        if let Some(text) = probe_selection_via_clipboard() {
                             if state.activity.load(Ordering::Relaxed) == activity {
                                 fallback = Some(FallbackSelection {
                                     text,
-                                    anchor,
                                     bundle_id: frontmost.bundle_id.clone(),
                                     activity,
                                 });
@@ -198,66 +165,40 @@ pub fn start(app: AppHandle, state: Arc<AppState>) {
                     }
 
                     let Some(entry) = fallback.as_ref() else {
-                        candidate = None;
-                        if state.selection_dismissed.lock().is_none() {
-                            hide(&app, &state, false);
-                        }
+                        clear_capture(&state);
                         continue;
                     };
-                    (entry.text.clone(), entry.anchor, SelectionSource::Clipboard)
+                    (entry.text.clone(), SelectionSource::Clipboard)
                 }
             };
 
-            if candidate.as_deref() != Some(text.as_str()) {
-                candidate = Some(text.clone());
-                if state.selection_dismissed.lock().as_deref() != Some(text.as_str()) {
-                    hide(&app, &state, false);
-                }
-                if source == SelectionSource::Ax {
-                    continue;
-                }
+            if store_capture(&state, text, &frontmost.bundle_id) {
+                state.diag(&format!(
+                    "selection captured: {} app={}",
+                    source.label(),
+                    frontmost.bundle_id
+                ));
             }
-
-            if state.selection_dismissed.lock().as_deref() == Some(text.as_str()) {
-                continue;
-            }
-
-            let already_visible = state.selection_visible.load(Ordering::Relaxed)
-                && state
-                    .selection
-                    .lock()
-                    .as_ref()
-                    .map(|capture| capture.text == text)
-                    .unwrap_or(false);
-            if already_visible {
-                continue;
-            }
-
-            if let Some(until) = *state.selection_suppress_until.lock() {
-                if Instant::now() < until {
-                    continue;
-                }
-            }
-
-            if state.selection_menu_open.load(Ordering::Relaxed) {
-                continue;
-            }
-
-            *state.selection.lock() = Some(SelectionCapture {
-                text,
-                bundle_id: frontmost.bundle_id.clone(),
-                at: Instant::now(),
-            });
-            *state.selection_dismissed.lock() = None;
-
-            show_at(&app, &state, anchor.0, anchor.1);
-            state.diag(&format!(
-                "selection shown: {} app={}",
-                source.label(),
-                frontmost.bundle_id
-            ));
         }
     });
+}
+
+fn clear_capture(state: &AppState) {
+    *state.selection.lock() = None;
+}
+
+fn store_capture(state: &AppState, text: String, bundle_id: &str) -> bool {
+    let mut guard = state.selection.lock();
+    let changed = guard
+        .as_ref()
+        .map(|capture| capture.text != text || capture.bundle_id != bundle_id)
+        .unwrap_or(true);
+    *guard = Some(SelectionCapture {
+        text,
+        bundle_id: bundle_id.to_string(),
+        at: Instant::now(),
+    });
+    changed
 }
 
 fn fallback_target_editable(failure: &SelectionFailure, bundle: &str) -> bool {
@@ -301,7 +242,7 @@ fn fallback_target_editable(failure: &SelectionFailure, bundle: &str) -> bool {
     }
 }
 
-fn probe_selection_via_clipboard() -> Option<(String, (f64, f64))> {
+fn probe_selection_via_clipboard() -> Option<String> {
     if platform::secure_input() || platform::mouse_button_down() {
         return None;
     }
@@ -353,46 +294,137 @@ fn probe_selection_via_clipboard() -> Option<(String, (f64, f64))> {
     if text.is_empty() {
         return None;
     }
-    let anchor = platform::mouse_location()?;
-    Some((text, anchor))
+    Some(text)
 }
 
-fn show_at(app: &AppHandle, state: &AppState, x: f64, y: f64) {
+fn show_menu(app: &AppHandle, state: &AppState, rect: tauri::Rect, generation: u64) {
+    if state.selection_hover_gen.load(Ordering::SeqCst) != generation
+        || !state.selection_tray_hovered.load(Ordering::SeqCst)
+    {
+        return;
+    }
+
     let Some(window) = app.get_webview_window("selection") else {
         return;
     };
 
-    let _ = window.set_size(LogicalSize::new(ICON_SIZE, ICON_SIZE));
-    let _ = window.set_position(LogicalPosition::new(x + 12.0, y + 14.0));
-    let _ = window.set_focusable(false);
-    let _ = window.show();
-    state.selection_visible.store(true, Ordering::Relaxed);
-    state.emit_event("selection-show", json!({}));
+    let hint_scale = window.scale_factor().unwrap_or(1.0);
+    let hint_position = rect.position.to_physical::<f64>(hint_scale);
+    let hint_size = rect.size.to_physical::<f64>(hint_scale);
+    let monitor = window
+        .monitor_from_point(
+            hint_position.x + hint_size.width / 2.0,
+            hint_position.y + hint_size.height / 2.0,
+        )
+        .ok()
+        .flatten()
+        .or_else(|| window.current_monitor().ok().flatten())
+        .or_else(|| window.primary_monitor().ok().flatten());
 
-    let Ok(Some(monitor)) = window.current_monitor() else {
-        return;
-    };
-    let Ok(position) = window.outer_position() else {
-        return;
-    };
+    let scale = monitor
+        .as_ref()
+        .map(|monitor| monitor.scale_factor())
+        .unwrap_or(hint_scale);
+    let position = rect.position.to_physical::<f64>(scale);
+    let size = rect.size.to_physical::<f64>(scale);
 
-    let scale = monitor.scale_factor();
-    let left = monitor.position().x as f64 / scale;
-    let top = monitor.position().y as f64 / scale;
-    let width = monitor.size().width as f64 / scale;
-    let height = monitor.size().height as f64 / scale;
-    let current_x = position.x as f64 / scale;
-    let current_y = position.y as f64 / scale;
-    let (clamped_x, clamped_y) = clamp_position(
-        current_x,
-        current_y,
-        (ICON_SIZE, ICON_SIZE),
-        (left, top, width, height),
-    );
+    let mut x = position.x / scale + size.width / scale - MENU_WIDTH;
+    let mut y = position.y / scale + size.height / scale + MENU_GAP;
 
-    if (clamped_x - current_x).abs() > 0.5 || (clamped_y - current_y).abs() > 0.5 {
-        let _ = window.set_position(LogicalPosition::new(clamped_x, clamped_y));
+    if let Some(monitor) = monitor {
+        let scale = monitor.scale_factor();
+        let left = monitor.position().x as f64 / scale;
+        let top = monitor.position().y as f64 / scale;
+        let width = monitor.size().width as f64 / scale;
+        let height = monitor.size().height as f64 / scale;
+        let (clamped_x, clamped_y) = clamp_menu_position(x, y, left, top, width, height);
+        x = clamped_x;
+        y = clamped_y;
     }
+
+    let _ = window.set_size(LogicalSize::new(MENU_WIDTH, MENU_HEIGHT));
+    let _ = window.set_position(LogicalPosition::new(x, y));
+    let _ = window.set_focusable(false);
+
+    state.selection_menu_open.store(true, Ordering::SeqCst);
+    state.selection_visible.store(true, Ordering::SeqCst);
+    state.selection_pointer_inside.store(false, Ordering::SeqCst);
+    *state.selection_menu_since.lock() = Some(Instant::now());
+
+    let _ = window.show();
+    state.emit_event("selection-show", json!({}));
+}
+
+pub fn tray_enter(app: &AppHandle, state: &Arc<AppState>, rect: tauri::Rect) {
+    let generation = state.selection_hover_gen.fetch_add(1, Ordering::SeqCst) + 1;
+    state.selection_tray_hovered.store(true, Ordering::SeqCst);
+
+    let app = app.clone();
+    let state = state.clone();
+    thread::spawn(move || {
+        thread::sleep(TRAY_SHOW_DELAY);
+        for attempt in 0..2 {
+            if state.selection_hover_gen.load(Ordering::SeqCst) != generation
+                || !state.selection_tray_hovered.load(Ordering::SeqCst)
+            {
+                return;
+            }
+
+            let has_text = state
+                .selection
+                .lock()
+                .as_ref()
+                .map(|capture| !capture.text.trim().is_empty())
+                .unwrap_or(false);
+            if has_text {
+                if state.selection_visible.load(Ordering::SeqCst)
+                    || state.selection_menu_open.load(Ordering::SeqCst)
+                {
+                    return;
+                }
+                show_menu(&app, &state, rect, generation);
+                return;
+            }
+
+            if attempt == 0 {
+                thread::sleep(POLL_INTERVAL);
+            }
+        }
+    });
+}
+
+pub fn tray_leave(app: &AppHandle, state: &Arc<AppState>) {
+    let generation = state.selection_hover_gen.fetch_add(1, Ordering::SeqCst) + 1;
+    state.selection_tray_hovered.store(false, Ordering::SeqCst);
+    schedule_hide(app, state, generation);
+}
+
+pub fn pointer_inside(app: &AppHandle, state: &Arc<AppState>, inside: bool) {
+    let generation = state.selection_hover_gen.fetch_add(1, Ordering::SeqCst) + 1;
+    state.selection_pointer_inside.store(inside, Ordering::SeqCst);
+
+    if inside
+        || state.selection_tray_hovered.load(Ordering::SeqCst)
+        || !state.selection_menu_open.load(Ordering::SeqCst)
+    {
+        return;
+    }
+    schedule_hide(app, state, generation);
+}
+
+fn schedule_hide(app: &AppHandle, state: &Arc<AppState>, generation: u64) {
+    let app = app.clone();
+    let state = state.clone();
+    thread::spawn(move || {
+        thread::sleep(HIDE_DELAY);
+        if state.selection_hover_gen.load(Ordering::SeqCst) != generation
+            || state.selection_tray_hovered.load(Ordering::SeqCst)
+            || state.selection_pointer_inside.load(Ordering::SeqCst)
+        {
+            return;
+        }
+        hide_menu(&app, &state);
+    });
 }
 
 fn clamp_position(
@@ -427,41 +459,6 @@ fn clamp_menu_position(
     )
 }
 
-pub fn expand(app: &AppHandle, state: &AppState) {
-    let Some(window) = app.get_webview_window("selection") else {
-        return;
-    };
-    *state.selection_menu_since.lock() = Some(Instant::now());
-    state.selection_menu_open.store(true, Ordering::Relaxed);
-
-    let Ok(Some(monitor)) = window.current_monitor() else {
-        let _ = window.set_size(LogicalSize::new(MENU_WIDTH, MENU_HEIGHT));
-        let _ = window.set_focusable(true);
-        let _ = window.set_focus();
-        return;
-    };
-    let Ok(position) = window.outer_position() else {
-        let _ = window.set_size(LogicalSize::new(MENU_WIDTH, MENU_HEIGHT));
-        let _ = window.set_focusable(true);
-        let _ = window.set_focus();
-        return;
-    };
-
-    let scale = monitor.scale_factor();
-    let left = monitor.position().x as f64 / scale;
-    let top = monitor.position().y as f64 / scale;
-    let width = monitor.size().width as f64 / scale;
-    let height = monitor.size().height as f64 / scale;
-    let x = position.x as f64 / scale;
-    let y = position.y as f64 / scale;
-    let (x, y) = clamp_menu_position(x, y, left, top, width, height);
-
-    let _ = window.set_size(LogicalSize::new(MENU_WIDTH, MENU_HEIGHT));
-    let _ = window.set_position(LogicalPosition::new(x, y));
-    let _ = window.set_focusable(true);
-    let _ = window.set_focus();
-}
-
 pub fn focus(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("selection") {
         let _ = window.set_focusable(true);
@@ -470,52 +467,19 @@ pub fn focus(app: &AppHandle) {
 }
 
 pub fn dismiss(app: &AppHandle, state: &AppState) {
-    hide(app, state, true);
+    hide_menu(app, state);
 }
 
-fn hide(app: &AppHandle, state: &AppState, remember: bool) {
-    if !remember && state.selection_menu_open.load(Ordering::Relaxed) {
-        return;
-    }
-
-    let was_visible = state.selection_visible.swap(false, Ordering::Relaxed);
-
-    if remember {
-        let dismissed = state
-            .selection
-            .lock()
-            .as_ref()
-            .map(|capture| capture.text.clone());
-        if dismissed.is_some() {
-            *state.selection_dismissed.lock() = dismissed;
-        }
-
-        let until = Instant::now() + HIDE_SUPPRESS;
-        let mut suppress = state.selection_suppress_until.lock();
-        let extend = match *suppress {
-            Some(current) => current < until,
-            None => true,
-        };
-        if extend {
-            *suppress = Some(until);
-        }
-
-        state
-            .selection_dismiss_gen
-            .fetch_add(1, Ordering::Relaxed);
-    } else {
-        *state.selection_dismissed.lock() = None;
-    }
-
-    *state.selection.lock() = None;
-    state.selection_menu_open.store(false, Ordering::Relaxed);
+pub fn hide_menu(app: &AppHandle, state: &AppState) {
+    state.selection_hover_gen.fetch_add(1, Ordering::SeqCst);
+    state.selection_pointer_inside.store(false, Ordering::SeqCst);
+    state.selection_menu_open.store(false, Ordering::SeqCst);
+    state.selection_visible.store(false, Ordering::SeqCst);
     *state.selection_menu_since.lock() = None;
 
-    if was_visible {
-        if let Some(window) = app.get_webview_window("selection") {
-            let _ = window.hide();
-            let _ = window.set_focusable(false);
-        }
+    if let Some(window) = app.get_webview_window("selection") {
+        let _ = window.hide();
+        let _ = window.set_focusable(false);
     }
 }
 
@@ -586,7 +550,10 @@ pub async fn run_action(
         let guard = state.selection.lock();
         let capture = guard
             .as_ref()
-            .ok_or_else(|| "Текст выделения потерян".to_string())?;
+            .ok_or_else(|| "Нет выделенного текста".to_string())?;
+        if capture.text.trim().is_empty() {
+            return Err("Нет выделенного текста".into());
+        }
         if capture.at.elapsed() > Duration::from_secs(120) {
             return Err("Выделение устарело — выделите текст заново".into());
         }
@@ -651,8 +618,6 @@ pub async fn run_action(
 
     actions::insert_result(state, &result)
         .inspect_err(|error| actions::show_action_error(app, state, error))?;
-
-    *state.selection_suppress_until.lock() = Some(Instant::now() + RESULT_SUPPRESS);
 
     state.diag("selection action delivered");
     Ok(())

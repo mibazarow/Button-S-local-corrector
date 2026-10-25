@@ -915,10 +915,11 @@ pub fn voice_models(state: State<'_, Arc<AppState>>) -> Vec<voice::VoiceModelVie
 
 #[tauri::command]
 pub fn voice_use_model(
+    app: AppHandle,
     state: State<'_, Arc<AppState>>,
     id: String,
 ) -> Result<Vec<voice::VoiceModelView>, String> {
-    voice::use_model(&state, &id)?;
+    voice::use_model(&app, &state, &id)?;
     state.emit_state();
     Ok(voice::list_models(&state))
 }
@@ -934,10 +935,11 @@ pub async fn voice_download_model(
 
 #[tauri::command]
 pub fn voice_delete_model(
+    app: AppHandle,
     state: State<'_, Arc<AppState>>,
     id: String,
 ) -> Result<Vec<voice::VoiceModelView>, String> {
-    voice::delete_model(&state, &id)
+    voice::delete_model(&app, &state, &id)
 }
 
 #[tauri::command]
@@ -976,8 +978,12 @@ pub async fn selection_action(
 }
 
 #[tauri::command]
-pub fn selection_expand(app: AppHandle, state: State<'_, Arc<AppState>>) {
-    crate::selection::expand(&app, &state);
+pub fn selection_pointer(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    inside: bool,
+) {
+    crate::selection::pointer_inside(&app, state.inner(), inside);
 }
 
 #[tauri::command]

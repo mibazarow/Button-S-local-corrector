@@ -4,12 +4,16 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+pub const SUGGEST_THRESHOLD: u32 = 3;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct UserDictionaryFile {
     pub dictionaries: Vec<NamedDictionary>,
     pub stop_pairs: Vec<(String, String)>,
     pub undo_counts: BTreeMap<String, u32>,
+    pub layout_reverts: BTreeMap<String, u32>,
+    pub dict_replacements: BTreeMap<String, u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,6 +47,8 @@ impl Default for UserDictionaryFile {
             }],
             stop_pairs: Vec::new(),
             undo_counts: BTreeMap::new(),
+            layout_reverts: BTreeMap::new(),
+            dict_replacements: BTreeMap::new(),
         }
     }
 }
@@ -111,57 +117,42 @@ impl UserDictionaryFile {
 
     pub fn add(&mut self, dictionary_id: &str, word: &str, language: &str) -> bool {
         let normalized = normalize(word);
-        if normalized.is_empty() {
+        if normalized.is_empty() || self.contains(&normalized) {
             return false;
         }
 
-        if !self.contains(&normalized) {
-            let dictionary = self
-                .dictionaries
-                .iter_mut()
-                .find(|dictionary| dictionary.id == dictionary_id);
-            if let Some(dictionary) = dictionary {
-                dictionary.words.push(DictEntry {
-                    word: word.trim().to_string(),
-                    weight: 10,
-                    tags: Vec::new(),
-                    comment: String::new(),
-                });
-                return true;
-            }
-        }
+        let entry = || DictEntry {
+            word: word.trim().to_string(),
+            weight: 10,
+            tags: Vec::new(),
+            comment: String::new(),
+        };
 
-        if !self.contains(&normalized) {
-            if let Some(dictionary) = self
-                .dictionaries
-                .iter_mut()
-                .find(|dictionary| dictionary.language == language)
-            {
-                dictionary.words.push(DictEntry {
-                    word: word.trim().to_string(),
-                    weight: 10,
-                    tags: Vec::new(),
-                    comment: String::new(),
-                });
-                return true;
-            }
-            let id = format!("custom-{}", now_millis());
-            self.dictionaries.push(NamedDictionary {
-                id,
-                name: "Личный".into(),
-                language: language.into(),
-                enabled: true,
-                words: vec![DictEntry {
-                    word: word.trim().to_string(),
-                    weight: 10,
-                    tags: Vec::new(),
-                    comment: String::new(),
-                }],
-            });
+        let preferred = self.dictionaries.iter().position(|dictionary| {
+            dictionary.enabled
+                && dictionary.id == dictionary_id
+                && dictionary.language == language
+        });
+        let target = preferred.or_else(|| {
+            self.dictionaries
+                .iter()
+                .position(|dictionary| dictionary.enabled && dictionary.language == language)
+        });
+
+        if let Some(index) = target {
+            self.dictionaries[index].words.push(entry());
             return true;
         }
 
-        false
+        let id = format!("custom-{}", now_millis());
+        self.dictionaries.push(NamedDictionary {
+            id,
+            name: "Личный".into(),
+            language: language.into(),
+            enabled: true,
+            words: vec![entry()],
+        });
+        true
     }
 
     pub fn remove(&mut self, word: &str) -> bool {
@@ -216,6 +207,32 @@ impl UserDictionaryFile {
                 .push((from.to_string(), to.to_string()));
         }
     }
+
+    pub fn note_layout_revert(&mut self, word: &str) -> bool {
+        note_threshold(&mut self.layout_reverts, word)
+    }
+
+    pub fn note_dict_replacement(&mut self, word: &str) -> bool {
+        note_threshold(&mut self.dict_replacements, word)
+    }
+
+    pub fn clear_layout_revert(&mut self, word: &str) {
+        self.layout_reverts.remove(&normalize(word));
+    }
+
+    pub fn clear_dict_replacement(&mut self, word: &str) {
+        self.dict_replacements.remove(&normalize(word));
+    }
+}
+
+fn note_threshold(counts: &mut BTreeMap<String, u32>, word: &str) -> bool {
+    let key = normalize(word);
+    if key.is_empty() {
+        return false;
+    }
+    let count = counts.entry(key).or_insert(0);
+    *count += 1;
+    *count >= SUGGEST_THRESHOLD
 }
 
 pub fn normalize(word: &str) -> String {
@@ -232,4 +249,103 @@ fn now_millis() -> u128 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn add_english_word_to_personal_ru_creates_english_dictionary() {
+        let mut file = UserDictionaryFile::default();
+        let id = file.dictionaries[0].id.clone();
+
+        assert!(file.add(&id, "keyboard", "en"));
+
+        assert!(file.words_for("en").contains(&"keyboard".to_string()));
+        assert!(!file.words_for("ru").contains(&"keyboard".to_string()));
+        assert!(file
+            .dictionaries
+            .iter()
+            .any(|dictionary| dictionary.id != id && dictionary.language == "en"));
+    }
+
+    #[test]
+    fn add_russian_word_stays_in_russian_dictionary() {
+        let mut file = UserDictionaryFile::default();
+        let id = file.dictionaries[0].id.clone();
+
+        assert!(file.add(&id, "Клавиатура", "ru"));
+
+        assert_eq!(file.dictionaries.len(), 1);
+        assert!(file.words_for("ru").contains(&"Клавиатура".to_string()));
+        assert!(file.words_for("en").is_empty());
+    }
+
+    #[test]
+    fn add_english_word_reuses_existing_english_dictionary() {
+        let mut file = UserDictionaryFile::default();
+        let english_id = file.add_dictionary("Work", "en");
+
+        assert!(file.add("personal", "mouse", "en"));
+
+        assert_eq!(file.dictionaries.len(), 2);
+        let english = file
+            .dictionaries
+            .iter()
+            .find(|dictionary| dictionary.id == english_id)
+            .expect("english dictionary");
+        assert!(english
+            .words
+            .iter()
+            .any(|entry| entry.word == "mouse" && entry.weight == 10));
+    }
+
+    #[test]
+    fn add_duplicate_returns_false() {
+        let mut file = UserDictionaryFile::default();
+        let id = file.dictionaries[0].id.clone();
+
+        assert!(file.add(&id, "мышка", "ru"));
+        assert!(!file.add(&id, "мышка", "ru"));
+        assert!(!file.add(&id, "МЫШКА", "ru"));
+
+        assert_eq!(file.dictionaries.len(), 1);
+        assert_eq!(file.dictionaries[0].words.len(), 1);
+    }
+
+    #[test]
+    fn layout_revert_threshold_triggers_at_three_and_clears() {
+        let mut file = UserDictionaryFile::default();
+
+        assert!(!file.note_layout_revert("Клавиатура"));
+        assert!(!file.note_layout_revert("клавиатура"));
+        assert!(file.note_layout_revert("КЛАВИАТУРА"));
+        assert!(file.note_layout_revert("клавиатура"));
+
+        file.clear_layout_revert("Клавиатура");
+        assert!(!file.note_layout_revert("клавиатура"));
+    }
+
+    #[test]
+    fn dict_replacement_threshold_triggers_at_three_and_clears() {
+        let mut file = UserDictionaryFile::default();
+
+        assert!(!file.note_dict_replacement("мышка"));
+        assert!(!file.note_dict_replacement("Мышка"));
+        assert!(file.note_dict_replacement("МЫШКА"));
+
+        file.clear_dict_replacement("мышка");
+        assert!(!file.note_dict_replacement("мышка"));
+    }
+
+    #[test]
+    fn empty_words_are_not_counted() {
+        let mut file = UserDictionaryFile::default();
+
+        assert!(!file.note_layout_revert(""));
+        assert!(!file.note_dict_replacement("   "));
+        assert!(file.layout_reverts.is_empty());
+        assert!(file.dict_replacements.is_empty());
+    }
 }

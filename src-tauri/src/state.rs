@@ -1,6 +1,7 @@
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use parking_lot::{Mutex, RwLock};
@@ -12,7 +13,7 @@ use crate::config::Config;
 use crate::history;
 use crate::llm::{PromptStore};
 use crate::platform;
-use crate::user_dict::UserDictionaryFile;
+use crate::user_dict::{normalize, UserDictionaryFile};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChangeKind {
@@ -56,12 +57,16 @@ pub struct AppState {
     pub selection_visible: AtomicBool,
     pub selection_menu_open: AtomicBool,
     pub selection_menu_since: Mutex<Option<Instant>>,
-    pub selection_dismissed: Mutex<Option<String>>,
-    pub selection_dismiss_gen: AtomicU64,
+    pub selection_hover_gen: AtomicU64,
+    pub selection_tray_hovered: AtomicBool,
+    pub selection_pointer_inside: AtomicBool,
     pub mouse_release_pending: AtomicBool,
     pub mouse_drag_start: Mutex<Option<(f64, f64)>>,
     pub mouse_dragged: AtomicBool,
-    pub selection_suppress_until: Mutex<Option<Instant>>,
+    pub dictionary_dialog_open: AtomicBool,
+    pub layout_corrections: Mutex<HashMap<String, Instant>>,
+    pub last_blocked_word: Mutex<Option<(String, Instant)>>,
+    pub backspaces_since_boundary: AtomicU32,
     app: RwLock<Option<AppHandle>>,
 }
 
@@ -125,12 +130,16 @@ impl AppState {
             selection_visible: AtomicBool::new(false),
             selection_menu_open: AtomicBool::new(false),
             selection_menu_since: Mutex::new(None),
-            selection_dismissed: Mutex::new(None),
-            selection_dismiss_gen: AtomicU64::new(0),
+            selection_hover_gen: AtomicU64::new(0),
+            selection_tray_hovered: AtomicBool::new(false),
+            selection_pointer_inside: AtomicBool::new(false),
             mouse_release_pending: AtomicBool::new(false),
             mouse_drag_start: Mutex::new(None),
             mouse_dragged: AtomicBool::new(false),
-            selection_suppress_until: Mutex::new(None),
+            dictionary_dialog_open: AtomicBool::new(false),
+            layout_corrections: Mutex::new(HashMap::new()),
+            last_blocked_word: Mutex::new(None),
+            backspaces_since_boundary: AtomicU32::new(0),
             app: RwLock::new(None),
         }
     }
@@ -258,6 +267,23 @@ impl AppState {
         let mut dictionary = self.user_dict.write();
         dictionary.count_undo(from, to);
         let _ = dictionary.save(&self.dict_path);
+    }
+
+    pub fn note_layout_correction(&self, word: &str) -> bool {
+        const WINDOW: Duration = Duration::from_secs(120);
+
+        let key = normalize(word);
+        if key.is_empty() {
+            return false;
+        }
+
+        let now = Instant::now();
+        let mut corrections = self.layout_corrections.lock();
+        let repeated = corrections
+            .get(&key)
+            .is_some_and(|at| now.duration_since(*at) <= WINDOW);
+        corrections.insert(key, now);
+        repeated
     }
 
     pub fn switch_layout(&self, language: &str) {

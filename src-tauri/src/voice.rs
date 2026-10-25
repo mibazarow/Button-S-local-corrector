@@ -61,7 +61,7 @@ enum Command {
     Stop,
     Cancel,
     Toggle,
-    Unload,
+    Reload,
 }
 
 static SENDER: OnceLock<Sender<Command>> = OnceLock::new();
@@ -124,7 +124,7 @@ pub fn list_models(state: &AppState) -> Vec<VoiceModelView> {
 }
 
 /// Переключает активную модель на уже скачанную.
-pub fn delete_model(state: &AppState, id: &str) -> Result<Vec<VoiceModelView>, String> {
+fn delete_model_files(state: &AppState, id: &str) -> Result<Vec<VoiceModelView>, String> {
     let spec = VOICE_MODELS
         .iter()
         .find(|spec| spec.id == id)
@@ -160,14 +160,20 @@ pub fn delete_model(state: &AppState, id: &str) -> Result<Vec<VoiceModelView>, S
         config.save(&state.config_path)?;
     }
 
-    if let Some(sender) = SENDER.get() {
-        let _ = sender.send(Command::Unload);
-    }
-
     Ok(list_models(state))
 }
 
-pub fn use_model(state: &AppState, id: &str) -> Result<(), String> {
+pub fn delete_model(
+    app: &AppHandle,
+    state: &Arc<AppState>,
+    id: &str,
+) -> Result<Vec<VoiceModelView>, String> {
+    let views = delete_model_files(state, id)?;
+    preload(app, state);
+    Ok(views)
+}
+
+fn activate_model(state: &AppState, id: &str) -> Result<(), String> {
     let spec = VOICE_MODELS
         .iter()
         .find(|spec| spec.id == id)
@@ -182,6 +188,12 @@ pub fn use_model(state: &AppState, id: &str) -> Result<(), String> {
     config.save(&state.config_path)
 }
 
+pub fn use_model(app: &AppHandle, state: &Arc<AppState>, id: &str) -> Result<(), String> {
+    activate_model(state, id)?;
+    preload(app, state);
+    Ok(())
+}
+
 fn sender(app: &AppHandle, state: &Arc<AppState>) -> &'static Sender<Command> {
     SENDER.get_or_init(|| {
         let (tx, rx) = mpsc::channel();
@@ -190,6 +202,10 @@ fn sender(app: &AppHandle, state: &Arc<AppState>) -> &'static Sender<Command> {
         thread::spawn(move || worker(app, state, rx));
         tx
     })
+}
+
+pub fn preload(app: &AppHandle, state: &Arc<AppState>) {
+    let _ = sender(app, state).send(Command::Reload);
 }
 
 pub fn handle_hotkey(app: &AppHandle, state: &Arc<AppState>, pressed: bool) {
@@ -250,9 +266,84 @@ struct Recording {
     hud_shown: bool,
 }
 
+fn load_context(state: &AppState) -> Option<whisper_rs::WhisperContext> {
+    // macOS/ggml: residency-set heartbeat blocks outlive `NSApplication terminate` and abort in `ggml_metal_rsets_free`.
+    std::env::set_var("GGML_METAL_NO_RESIDENCY", "1");
+    let path = model_path(state);
+    let size = std::fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0);
+    if size < 10_000_000 {
+        state.diag("voice preload skipped: model not downloaded");
+        return None;
+    }
+
+    if cfg!(target_os = "macos") {
+        let started = Instant::now();
+        let params = whisper_rs::WhisperContextParameters {
+            use_gpu: true,
+            flash_attn: false,
+            ..Default::default()
+        };
+        match whisper_rs::WhisperContext::new_with_params(&path, params) {
+            Ok(context) => {
+                state.diag(&format!(
+                    "voice model preloaded: gpu, {} ms",
+                    started.elapsed().as_millis()
+                ));
+                return Some(context);
+            }
+            Err(error) => {
+                let message = format!("voice gpu preload failed: {error}");
+                let path_text = path.to_string_lossy();
+                state.diag(&message.replace(path_text.as_ref(), "<model>"));
+            }
+        }
+    }
+
+    let started = Instant::now();
+    let params = whisper_rs::WhisperContextParameters {
+        use_gpu: false,
+        flash_attn: false,
+        ..Default::default()
+    };
+    match whisper_rs::WhisperContext::new_with_params(&path, params) {
+        Ok(context) => {
+            state.diag(&format!(
+                "voice model preloaded: cpu, {} ms",
+                started.elapsed().as_millis()
+            ));
+            Some(context)
+        }
+        Err(error) => {
+            let message = format!("voice cpu preload failed: {error}");
+            let path_text = path.to_string_lossy();
+            state.diag(&message.replace(path_text.as_ref(), "<model>"));
+            None
+        }
+    }
+}
+
+fn reload_context(
+    state: &AppState,
+    context: &mut Option<whisper_rs::WhisperContext>,
+    loaded_path: &mut Option<PathBuf>,
+) {
+    let path = model_path(state);
+    if context.is_some() && loaded_path.as_ref() == Some(&path) {
+        return;
+    }
+    *context = None;
+    *loaded_path = None;
+    if let Some(loaded) = load_context(state) {
+        *context = Some(loaded);
+        *loaded_path = Some(path);
+    }
+}
+
 fn worker(app: AppHandle, state: Arc<AppState>, receiver: mpsc::Receiver<Command>) {
     let mut recording: Option<Recording> = None;
-    let mut context: Option<whisper_rs::WhisperContext> = None;
+    let mut context = load_context(&state);
+    let mut loaded_path = context.as_ref().map(|_| model_path(&state));
+    let mut reload_pending = false;
 
     loop {
         let message = receiver.recv_timeout(Duration::from_millis(100));
@@ -267,27 +358,41 @@ fn worker(app: AppHandle, state: Arc<AppState>, receiver: mpsc::Receiver<Command
             }
             Ok(Command::Stop) => {
                 if let Some(active) = recording.take() {
-                    finish_recording(&app, &state, active, &mut context);
+                    finish_recording(&app, &state, active, &mut context, &mut loaded_path);
+                }
+                if reload_pending {
+                    reload_pending = false;
+                    reload_context(&state, &mut context, &mut loaded_path);
                 }
             }
             Ok(Command::Cancel) => {
                 recording = None;
                 hide_hud(&app);
                 state.emit_event("voice-state", json!({ "state": "idle" }));
+                if reload_pending {
+                    reload_pending = false;
+                    reload_context(&state, &mut context, &mut loaded_path);
+                }
             }
-            Ok(Command::Unload) => {
-                if recording.is_none() {
-                    context = None;
+            Ok(Command::Reload) => {
+                if recording.is_some() {
+                    reload_pending = true;
+                } else {
+                    reload_context(&state, &mut context, &mut loaded_path);
                 }
             }
             Ok(Command::Toggle) => {
                 if let Some(active) = recording.take() {
-                    finish_recording(&app, &state, active, &mut context);
+                    finish_recording(&app, &state, active, &mut context, &mut loaded_path);
                 } else {
                     match start_recording(&state) {
                         Ok(active) => recording = Some(active),
                         Err(error) => notify_error(&state, &error),
                     }
+                }
+                if reload_pending {
+                    reload_pending = false;
+                    reload_context(&state, &mut context, &mut loaded_path);
                 }
             }
             Err(RecvTimeoutError::Timeout) => {
@@ -327,7 +432,11 @@ fn worker(app: AppHandle, state: Arc<AppState>, receiver: mpsc::Receiver<Command
 
                     if too_long || vad_stop {
                         let active = recording.take().unwrap();
-                        finish_recording(&app, &state, active, &mut context);
+                        finish_recording(&app, &state, active, &mut context, &mut loaded_path);
+                        if reload_pending {
+                            reload_pending = false;
+                            reload_context(&state, &mut context, &mut loaded_path);
+                        }
                     }
                 }
             }
@@ -514,6 +623,7 @@ fn finish_recording(
     state: &Arc<AppState>,
     active: Recording,
     context: &mut Option<whisper_rs::WhisperContext>,
+    loaded_path: &mut Option<PathBuf>,
 ) {
     let samples = {
         let mut guard = active.samples.lock();
@@ -532,15 +642,16 @@ fn finish_recording(
     state.emit_event("voice-state", json!({ "state": "processing" }));
 
     let resampled = resample(&samples, active.sample_rate, 16_000);
-    let path = model_path(state);
 
     if context.is_none() {
-        let params = whisper_rs::WhisperContextParameters::default();
-        match whisper_rs::WhisperContext::new_with_params(&path, params) {
-            Ok(loaded) => *context = Some(loaded),
-            Err(error) => {
+        match load_context(state) {
+            Some(loaded) => {
+                *context = Some(loaded);
+                *loaded_path = Some(model_path(state));
+            }
+            None => {
                 hide_hud(app);
-                notify_error(state, &format!("Модель не загрузилась: {error}"));
+                notify_error(state, "Модель не загрузилась");
                 return;
             }
         }
@@ -800,6 +911,7 @@ async fn download_model_inner(
         let _ = config.save(&state.config_path);
     }
 
+    preload(app, state);
     let _ = app.emit("voice-download", json!({ "id": spec.id, "done": true }));
     Ok(model_status(state))
 }
@@ -837,7 +949,7 @@ mod tests {
             .set_len(11_000_000)
             .unwrap();
 
-        use_model(&state, "small").expect("switch to small");
+        activate_model(&state, "small").expect("switch to small");
         let views = list_models(&state);
         let small_view = views.iter().find(|view| view.id == "small").unwrap();
         assert!(small_view.downloaded && small_view.active);
@@ -846,7 +958,7 @@ mod tests {
             small.to_string_lossy().to_string()
         );
 
-        assert!(use_model(&state, "medium").is_err());
+        assert!(activate_model(&state, "medium").is_err());
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -861,15 +973,25 @@ mod tests {
             .unwrap()
             .set_len(11_000_000)
             .unwrap();
-        use_model(&state, "small").expect("switch to small");
+        activate_model(&state, "small").expect("switch to small");
 
-        let views = delete_model(&state, "small").expect("delete small");
+        let views = delete_model_files(&state, "small").expect("delete small");
         let small_view = views.iter().find(|view| view.id == "small").unwrap();
         assert!(!small_view.downloaded);
         assert!(!small_view.active);
         assert!(!small.exists());
         assert_eq!(state.config.read().voice.model, "");
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn preload_skips_missing_model_without_path_leak() {
+        let (state, dir) = temp_state("preload");
+        assert!(load_context(&state).is_none());
+        let log = std::fs::read_to_string(dir.join("diagnostics.log")).unwrap();
+        assert!(log.contains("voice preload skipped: model not downloaded"));
+        assert!(!log.contains(&dir.to_string_lossy().to_string()));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

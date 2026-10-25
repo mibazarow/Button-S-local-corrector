@@ -43,20 +43,22 @@
 ```bash
 npm run check                                        # svelte-check, 0 ошибок
 npm run build                                        # vite build
-cargo test --manifest-path src-tauri/Cargo.toml      # юнит/интеграционные тесты
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
-cargo build --manifest-path src-tauri/Cargo.toml     # debug-бинарник
+cargo test --release --manifest-path src-tauri/Cargo.toml   # юнит/интеграционные тесты
+cargo clippy --release --manifest-path src-tauri/Cargo.toml --all-targets
+npx tauri build --bundles app                        # релизная сборка .app
 ```
 
-- Минимум для любой правки: `npm run check` + релевантные `cargo test`.
-- Менял бэкенд — прогоняй `cargo clippy`; проект держим на **0 warnings**.
-- UI или системное поведение проверяй запуском:
-  `./src-tauri/target/debug/button-s --settings`
-  или собранным `.app` через `open ... --args --settings`.
+- Минимум для любой правки: `npm run check` + релевантные `cargo test --release`.
+- Менял бэкенд — прогоняй `cargo clippy --release`; проект держим на **0 warnings**.
+- UI или системное поведение проверяй только собранным `.app`:
+  `open /Applications/BUTTON-S.app --args --settings`
+  или `open src-tauri/target/release/bundle/macos/BUTTON-S.app --args --settings`.
 - Разрешения macOS (Accessibility / Input Monitoring) в тестовой среде могут
   отсутствовать. Не считай отсутствие permissions багом кода.
-- Не запускай `cargo clean` и не удаляй `src-tauri/target/`: там лежит тяжёлая
-  сборка `llama-cpp-2`/`whisper-rs`, полная пересборка занимает много времени.
+- Не запускай `cargo clean` и не удаляй `src-tauri/target/release/`: там лежит
+  тяжёлая сборка `llama-cpp-2`/`whisper-rs` с LTO, полная пересборка занимает
+  много времени. Профиль `debug` в рабочем процессе не используется и может
+  быть удалён (`src-tauri/target/debug`), но `release` удалять вслепую нельзя.
 
 ## 4. Карта кода
 
@@ -152,8 +154,10 @@ cargo build --manifest-path src-tauri/Cargo.toml     # debug-бинарник
   `GGML_ASSERT`/SIGABRT. Не переносить llama обратно в основной крейт.
 - `npx tauri build` собирает helper через `beforeBuildCommand`; не удалять
   `src-tauri/llm-worker` и `scripts/build-llm-worker.mjs`.
-- `cargo clean`, удаление `target/`, пересборка `llama-cpp-2`/`whisper-rs` —
-  долго; только при реальной необходимости.
+- `cargo clean` и удаление `target/release` (включая артефакты сборки
+  `llama-cpp-2`/`whisper-rs`) — долго; только при реальной необходимости.
+  Профиль `debug` не входит в рабочий процесс и может быть удалён без потерь
+  для release-сборки.
 - Скачивание моделей (Whisper 78 МБ–1.6 ГБ, LLM 250 МБ–2.5 ГБ) — только по
   действию пользователя; в репозиторий не добавлять.
 - Не запускать несколько субагентов-писателей одновременно над одними файлами.
@@ -166,8 +170,7 @@ cargo build --manifest-path src-tauri/Cargo.toml     # debug-бинарник
    (если внутренние документы есть на диске).
 2. Проверить `git status`, чтобы не смешать свою работу с чужими правками.
 3. Найти затронутые файлы; для крупного исследования использовать субагента.
-4. Делать **минимальное полное изменение** (ponytail: без YAGNI и
-   оверинжиниринга), не переписывать соседний код «заодно».
+4. Делать **минимальное полное изменение** (ponytail: без YAGNI и оверинжиниринга), не переписывать соседний код «заодно».
 5. Добавить/обновить тесты рядом с кодом.
 6. Прогнать проверки из §3.
 7. Обновить `.internal/context.md`, если изменилось поведение, архитектура, схема

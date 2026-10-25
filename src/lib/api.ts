@@ -321,7 +321,8 @@ export const api = {
   copyText: (text: string) => invoke<void>("copy_to_clipboard", { text }),
   selectionAction: (action: string, prompt: string) =>
     invoke<void>("selection_action", { action, prompt }),
-  selectionExpand: () => invoke<void>("selection_expand"),
+  selectionPointer: (inside: boolean) =>
+    invoke<void>("selection_pointer", { inside }),
   selectionFocus: () => invoke<void>("selection_focus"),
   selectionHide: () => invoke<void>("selection_hide"),
   diagnostics: () => invoke<string>("diagnostics"),

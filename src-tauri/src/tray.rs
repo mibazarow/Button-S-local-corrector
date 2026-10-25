@@ -1,24 +1,48 @@
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
+use tauri::image::Image;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
-use tauri::tray::TrayIconBuilder;
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, Wry};
 
+use crate::selection;
 use crate::state::AppState;
 
 const TRAY_ID: &str = "main";
+const APP_ICON: &[u8] = include_bytes!("../icons/32x32.png");
 
 pub fn create(app: &AppHandle, state: &AppState) -> tauri::Result<()> {
     let menu = build_menu(app, state)?;
-    let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray@2x.png"))?;
+    let icon = Image::from_bytes(APP_ICON)?;
 
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(icon)
-        .icon_as_template(true)
+        .icon_as_template(false)
         .menu(&menu)
-        .show_menu_on_left_click(true)
+        .show_menu_on_left_click(false)
         .tooltip("BUTTON-S")
+        .on_tray_icon_event(|tray, event| {
+            let app = tray.app_handle();
+            let state = app.state::<Arc<AppState>>();
+            match event {
+                TrayIconEvent::Enter { rect, .. } => {
+                    selection::tray_enter(app, state.inner(), rect);
+                }
+                TrayIconEvent::Leave { .. } => {
+                    selection::tray_leave(app, state.inner());
+                }
+                TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                } => {
+                    selection::hide_menu(app, &state);
+                    show_settings(app);
+                }
+                _ => {}
+            }
+        })
         .on_menu_event(|app, event| {
             let state = app.state::<Arc<AppState>>();
             match event.id().as_ref() {

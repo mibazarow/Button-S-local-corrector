@@ -31,11 +31,11 @@ keyring = { version = "3", features = ["apple-native"] }
 arboard = "3"
 cpal = "0.18"
 hound = "3.5"
-whisper-rs = "0.16"
 tauri-plugin-single-instance = "2"
 plist = "1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+whisper-rs = { version = "0.16", features = ["metal"] }
 core-foundation = "0.10"
 core-foundation-sys = "0.8"
 objc2 = "0.6"
@@ -43,6 +43,9 @@ objc2-foundation = { version = "0.3", features = ["NSString"] }
 objc2-app-kit = { version = "0.3", features = ["NSWorkspace", "NSRunningApplication"] }
 objc2-av-foundation = { version = "0.3", features = ["AVCaptureDevice", "AVMediaFormat", "block2"] }
 block2 = "0.6"
+
+[target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
+whisper-rs = "0.16"
 
 [profile.release]
 codegen-units = 1

@@ -9,6 +9,7 @@ mod llm_local;
 mod platform;
 mod selection;
 mod state;
+pub mod suggestion;
 mod tray;
 mod user_dict;
 mod voice;
@@ -56,7 +57,7 @@ fn create_aux_windows(app: &tauri::AppHandle) -> tauri::Result<()> {
         WebviewUrl::App("index.html#selection".into()),
     )
     .title("BUTTON-S")
-    .inner_size(40.0, 40.0)
+    .inner_size(300.0, 430.0)
     .decorations(false)
     .transparent(true)
     .shadow(false)
@@ -153,7 +154,7 @@ pub fn run() {
             commands::voice_cancel,
             commands::copy_to_clipboard,
             commands::selection_action,
-            commands::selection_expand,
+            commands::selection_pointer,
             commands::selection_focus,
             commands::selection_hide,
             commands::add_selection_word,
@@ -200,6 +201,7 @@ pub fn run() {
             selection::start(handle.clone(), state.clone());
             platform::request_permissions();
             hotkeys::register(&handle, &state);
+            voice::preload(&handle, &state);
 
             if std::env::args().any(|argument| argument == "--settings") {
                 tray::show_settings(&handle);

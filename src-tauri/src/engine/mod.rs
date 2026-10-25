@@ -6,11 +6,12 @@ pub mod typo;
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::config::Feature;
 use crate::platform::{self, KeyEvent};
 use crate::state::{AppState, ChangeKind};
+use crate::user_dict::normalize;
 
 pub fn start(state: Arc<AppState>) {
     let (sender, receiver) = mpsc::channel();
@@ -36,6 +37,9 @@ pub fn start(state: Arc<AppState>) {
                     buffer.pop();
                     line.pop();
                     sentence_start = false;
+                    state
+                        .backspaces_since_boundary
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
                 KeyEvent::Boundary(separator) => {
                     let previous_line = if separator == '\n' {
@@ -63,10 +67,12 @@ pub fn start(state: Arc<AppState>) {
                 KeyEvent::Reset => {
                     buffer.clear();
                     line.clear();
+                    clear_boundary_session(&state);
                 }
                 KeyEvent::Shortcut => {
                     buffer.clear();
                     line.clear();
+                    clear_boundary_session(&state);
                 }
                 KeyEvent::Dictate(pressed) => {
                     if let Some(app) = state.app_handle() {
@@ -169,6 +175,8 @@ fn handle_boundary(state: &Arc<AppState>, word: &str, separator: char) -> Option
             state.user_dict.read().contains(word),
         )
     };
+
+    note_boundary_replacement(state, word, user_protected);
 
     if user_protected {
         return None;
@@ -294,9 +302,47 @@ fn handle_boundary(state: &Arc<AppState>, word: &str, separator: char) -> Option
     None
 }
 
+fn clear_boundary_session(state: &AppState) {
+    state
+        .backspaces_since_boundary
+        .store(0, std::sync::atomic::Ordering::Relaxed);
+    *state.last_blocked_word.lock() = None;
+}
+
+fn note_boundary_replacement(state: &Arc<AppState>, word: &str, user_protected: bool) {
+    let previous = state.last_blocked_word.lock().clone();
+    let backspaces = state
+        .backspaces_since_boundary
+        .swap(0, std::sync::atomic::Ordering::Relaxed);
+
+    if let Some((previous_word, _)) = previous {
+        let still_known = state.user_dict.read().contains(&previous_word);
+        if let Some(candidate) =
+            dict_removal_candidate(Some(&previous_word), still_known, backspaces, word)
+        {
+            crate::suggestion::note_dict_replacement(state, &candidate);
+        }
+    }
+
+    *state.last_blocked_word.lock() = user_protected.then(|| (word.to_string(), Instant::now()));
+}
+
+pub fn dict_removal_candidate(
+    previous: Option<&str>,
+    previous_in_dict: bool,
+    backspaces: u32,
+    word: &str,
+) -> Option<String> {
+    let previous = previous?;
+    if !previous_in_dict || backspaces == 0 || normalize(previous) == normalize(word) {
+        return None;
+    }
+    Some(previous.to_string())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn apply_change(
-    state: &AppState,
+    state: &Arc<AppState>,
     app_id: &str,
     expected: u64,
     kind: ChangeKind,
@@ -329,6 +375,10 @@ fn apply_change(
         word.to_string(),
         replacement.to_string(),
     );
+
+    if kind == ChangeKind::Layout && state.note_layout_correction(word) {
+        crate::suggestion::note_layout_revert(state, word);
+    }
 
     let (auto_switch, notify) = {
         let config = state.config.read();
@@ -487,7 +537,7 @@ pub fn convert_last_word(state: &AppState) {
     log::info!("manual layout conversion applied");
 }
 
-pub fn undo_last(state: &AppState) {
+pub fn undo_last(state: &Arc<AppState>) {
     let Some(change) = state.take_change() else {
         return;
     };
@@ -514,6 +564,14 @@ pub fn undo_last(state: &AppState) {
 
     if change.kind == ChangeKind::Typo {
         state.note_typo_undo(&change.from, &change.to);
+    }
+
+    if change.kind == ChangeKind::Layout {
+        crate::suggestion::note_layout_revert(state, &change.from);
+    }
+
+    if state.user_dict.read().contains(&change.to) {
+        crate::suggestion::note_dict_replacement(state, &change.to);
     }
 
     if state.config.read().layout.auto_switch_layout {
@@ -548,5 +606,26 @@ mod tests {
         let (delete_count, insertion) = correction_plan("z", ' ', "я");
         assert_eq!(delete_count, 2);
         assert_eq!(insertion, "я ");
+    }
+
+    #[test]
+    fn detects_dictionary_word_replacement_after_deletion() {
+        assert_eq!(
+            dict_removal_candidate(Some("Клавиатура"), true, 1, "мышь"),
+            Some("Клавиатура".to_string())
+        );
+        assert_eq!(
+            dict_removal_candidate(Some("Клавиатура"), true, 0, "мышь"),
+            None
+        );
+        assert_eq!(
+            dict_removal_candidate(Some("Клавиатура"), false, 1, "мышь"),
+            None
+        );
+        assert_eq!(
+            dict_removal_candidate(Some("Клавиатура"), true, 1, "КЛАВИАТУРА"),
+            None
+        );
+        assert_eq!(dict_removal_candidate(None, true, 1, "мышь"), None);
     }
 }
