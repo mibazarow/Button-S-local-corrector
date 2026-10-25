@@ -591,6 +591,19 @@ impl Config {
             self.replacements = default_replacements();
         }
         self.llm.max_input_chars = self.llm.max_input_chars.clamp(1000, 200_000);
+        if self
+            .llm
+            .providers
+            .get(crate::llm_local::LOCAL_PROVIDER)
+            .is_some_and(|provider| {
+                provider.kind == "local"
+                    && !crate::llm_local::is_known_model(&provider.model)
+            })
+        {
+            self.llm
+                .providers
+                .remove(crate::llm_local::LOCAL_PROVIDER);
+        }
         if !self.llm.providers.contains_key(&self.llm.default_provider) {
             self.llm.default_provider = self
                 .llm
@@ -601,6 +614,15 @@ impl Config {
                 .unwrap_or_default();
         }
         self.voice.max_duration_sec = self.voice.max_duration_sec.clamp(5, 3600);
+        if !self.voice.model.is_empty() {
+            let file = Path::new(&self.voice.model)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("");
+            if matches!(file, "ggml-tiny.bin" | "ggml-base.bin") {
+                self.voice.model.clear();
+            }
+        }
         self.schema_version = SCHEMA_VERSION;
     }
 
@@ -807,5 +829,99 @@ mod tests {
         config.normalize();
         assert_eq!(config.hotkeys["dictate"], "ShiftRight");
         assert_eq!(config.voice.hotkey, "ShiftRight");
+    }
+
+    #[test]
+    fn normalize_clears_removed_voice_models() {
+        let mut config = Config::default();
+        config.voice.model = "/tmp/models/ggml-tiny.bin".into();
+        config.normalize();
+        assert_eq!(config.voice.model, "");
+
+        config.voice.model = "/tmp/models/ggml-base.bin".into();
+        config.normalize();
+        assert_eq!(config.voice.model, "");
+    }
+
+    #[test]
+    fn normalize_preserves_voice_model_path() {
+        let mut config = Config::default();
+        config.voice.model = "/tmp/models/ggml-small.bin".into();
+        config.normalize();
+        assert_eq!(config.voice.model, "/tmp/models/ggml-small.bin");
+    }
+
+    #[test]
+    fn normalize_drops_local_provider_with_removed_model() {
+        let mut config = Config::default();
+        config.llm.providers.insert(
+            crate::llm_local::LOCAL_PROVIDER.into(),
+            Provider {
+                kind: "local".into(),
+                base_url: "local://".into(),
+                model: "vikhr-qwen-0.5b".into(),
+                key_ref: String::new(),
+                timeout_sec: 120,
+                models: Vec::new(),
+            },
+        );
+        config.llm.default_provider = crate::llm_local::LOCAL_PROVIDER.into();
+
+        config.normalize();
+
+        assert!(!config
+            .llm
+            .providers
+            .contains_key(crate::llm_local::LOCAL_PROVIDER));
+        assert_eq!(config.llm.default_provider, "");
+    }
+
+    #[test]
+    fn normalize_keeps_local_provider_with_known_model() {
+        let mut config = Config::default();
+        config.llm.providers.insert(
+            crate::llm_local::LOCAL_PROVIDER.into(),
+            Provider {
+                kind: "local".into(),
+                base_url: "local://".into(),
+                model: "vikhr-llama-1b".into(),
+                key_ref: String::new(),
+                timeout_sec: 120,
+                models: Vec::new(),
+            },
+        );
+        config.llm.default_provider = crate::llm_local::LOCAL_PROVIDER.into();
+
+        config.normalize();
+
+        assert!(config
+            .llm
+            .providers
+            .contains_key(crate::llm_local::LOCAL_PROVIDER));
+        assert_eq!(config.llm.default_provider, crate::llm_local::LOCAL_PROVIDER);
+    }
+
+    #[test]
+    fn normalize_does_not_touch_cloud_providers() {
+        let mut config = Config::default();
+        config.llm.providers.insert(
+            "My proxy".into(),
+            Provider {
+                kind: "openai".into(),
+                base_url: "https://my-proxy.example/v1".into(),
+                model: "gpt-4o".into(),
+                key_ref: "provider:My proxy".into(),
+                timeout_sec: 60,
+                models: vec!["gpt-4o".into()],
+            },
+        );
+        config.llm.default_provider = "My proxy".into();
+
+        config.normalize();
+
+        let provider = config.llm.providers.get("My proxy").unwrap();
+        assert_eq!(provider.kind, "openai");
+        assert_eq!(provider.model, "gpt-4o");
+        assert_eq!(config.llm.default_provider, "My proxy");
     }
 }

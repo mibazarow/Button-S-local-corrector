@@ -8,14 +8,17 @@ use std::time::Duration;
 
 use core_foundation_sys::base::CFRelease;
 
-use crate::platform::KeyEvent;
+use crate::platform::{drag_exceeded, KeyEvent};
 use crate::state::AppState;
 
 use super::ffi::*;
 use super::permissions;
 
-const EVENT_MASK: u64 =
-    (1u64 << KCG_EVENT_KEY_DOWN) | (1u64 << KCG_EVENT_FLAGS_CHANGED);
+const EVENT_MASK: u64 = (1u64 << KCG_EVENT_KEY_DOWN)
+    | (1u64 << KCG_EVENT_FLAGS_CHANGED)
+    | (1u64 << KCG_EVENT_LEFT_MOUSE_DOWN)
+    | (1u64 << KCG_EVENT_LEFT_MOUSE_DRAGGED)
+    | (1u64 << KCG_EVENT_LEFT_MOUSE_UP);
 
 struct HookCtx {
     tap: AtomicPtr<c_void>,
@@ -54,6 +57,39 @@ extern "C" fn callback(
             let tap = ctx.tap.load(Ordering::Relaxed);
             if !tap.is_null() {
                 CGEventTapEnable(tap, true);
+            }
+            return event;
+        }
+
+        if event_type == KCG_EVENT_LEFT_MOUSE_DOWN {
+            if CGEventGetIntegerValueField(event, KCG_EVENT_SOURCE_USER_DATA) != MAGIC_MARKER {
+                let point = CGEventGetLocation(event);
+                *ctx.state.mouse_drag_start.lock() = Some((point.x, point.y));
+                ctx.state.mouse_dragged.store(false, Ordering::Relaxed);
+            }
+            return event;
+        }
+
+        if event_type == KCG_EVENT_LEFT_MOUSE_DRAGGED {
+            if CGEventGetIntegerValueField(event, KCG_EVENT_SOURCE_USER_DATA) != MAGIC_MARKER {
+                let start = *ctx.state.mouse_drag_start.lock();
+                if let Some(start) = start {
+                    let point = CGEventGetLocation(event);
+                    if drag_exceeded(start, (point.x, point.y)) {
+                        ctx.state.mouse_dragged.store(true, Ordering::Relaxed);
+                    }
+                }
+            }
+            return event;
+        }
+
+        if event_type == KCG_EVENT_LEFT_MOUSE_UP {
+            let dragged = ctx.state.mouse_dragged.swap(false, Ordering::Relaxed);
+            *ctx.state.mouse_drag_start.lock() = None;
+            if CGEventGetIntegerValueField(event, KCG_EVENT_SOURCE_USER_DATA) != MAGIC_MARKER {
+                ctx.state
+                    .mouse_release_pending
+                    .store(dragged, Ordering::Relaxed);
             }
             return event;
         }

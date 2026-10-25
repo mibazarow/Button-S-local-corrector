@@ -9,10 +9,12 @@ use llama_cpp_2::model::LlamaModel;
 use llama_cpp_2::sampling::LlamaSampler;
 use serde::{Deserialize, Serialize};
 
-const N_CTX: u32 = 4096;
-const MAX_TOKENS: u32 = 1024;
+const LOCAL_MAX_INPUT_TOKENS: usize = 4100;
+const LOCAL_MAX_OUTPUT_TOKENS: usize = 4100;
+const MIN_CONTEXT: u32 = 1024;
+const PREFILL_CHUNK: usize = 512;
 const SYSTEM_PROMPT: &str =
-    "Ты — аккуратный помощник по работе с текстом. Возвращай только итоговый текст.";
+    "You are a text editor. Return ONLY the final text, with no introductions, explanations, labels, quotation marks, or markdown. Do not answer the text; perform the instruction on it. Write the result in the same language as the source text unless the instruction explicitly asks for translation.";
 
 #[derive(Deserialize)]
 struct Request {
@@ -130,22 +132,6 @@ fn generate(
     temperature: f32,
     is_qwen3: bool,
 ) -> Result<String, String> {
-    let backend = backend()?;
-    let threads = std::thread::available_parallelism()
-        .map(|count| count.get() as i32)
-        .unwrap_or(4);
-
-    let context_params = LlamaContextParams::default()
-        .with_n_ctx(std::num::NonZeroU32::new(N_CTX))
-        .with_n_batch(512)
-        .with_n_threads(threads)
-        .with_flash_attention_policy(
-            llama_cpp_sys_2::LLAMA_FLASH_ATTN_TYPE_DISABLED,
-        );
-    let mut context = model
-        .new_context(backend, context_params)
-        .map_err(|error| format!("Не удалось создать контекст: {error}"))?;
-
     let template = model
         .chat_template(None)
         .map_err(|_| "У модели нет chat-шаблона".to_string())?;
@@ -167,18 +153,47 @@ fn generate(
     if tokens.is_empty() {
         return Err("Пустой промпт".into());
     }
-
-    let mut batch = LlamaBatch::new(tokens.len() + MAX_TOKENS as usize, 1);
-    for (position, token) in tokens.iter().enumerate() {
-        let is_last = position == tokens.len() - 1;
-        batch
-            .add(*token, position as i32, &[0], is_last)
-            .map_err(|error| format!("Ошибка батча: {error}"))?;
+    if tokens.len() > LOCAL_MAX_INPUT_TOKENS {
+        return Err(format!(
+            "Текст слишком длинный для локальной модели: {} токенов при лимите 4100. Сократите текст или выберите облачного провайдера.",
+            tokens.len()
+        ));
     }
-    context
-        .decode(&mut batch)
-        .map_err(|error| format!("Ошибка инференса: {error}"))?;
-    batch.clear();
+
+    let backend = backend()?;
+    let threads = std::thread::available_parallelism()
+        .map(|count| count.get() as i32)
+        .unwrap_or(4);
+    let n_ctx = (tokens.len() + LOCAL_MAX_OUTPUT_TOKENS + 32) as u32;
+    let n_ctx = std::num::NonZeroU32::new(n_ctx.max(MIN_CONTEXT));
+    let context_params = LlamaContextParams::default()
+        .with_n_ctx(n_ctx)
+        .with_n_batch(512)
+        .with_n_threads(threads)
+        .with_flash_attention_policy(
+            llama_cpp_sys_2::LLAMA_FLASH_ATTN_TYPE_DISABLED,
+        );
+    let mut context = model
+        .new_context(backend, context_params)
+        .map_err(|error| format!("Не удалось создать контекст: {error}"))?;
+
+    let mut batch = LlamaBatch::new(PREFILL_CHUNK, 1);
+    for (chunk_index, chunk) in tokens.chunks(PREFILL_CHUNK).enumerate() {
+        let base = chunk_index * PREFILL_CHUNK;
+        let last_chunk = base + chunk.len() == tokens.len();
+        for (offset, token) in chunk.iter().enumerate() {
+            let logits = last_chunk && offset + 1 == chunk.len();
+            batch
+                .add(*token, (base + offset) as i32, &[0], logits)
+                .map_err(|error| format!("Ошибка батча: {error}"))?;
+        }
+        context
+            .decode(&mut batch)
+            .map_err(|error| format!("Ошибка инференса: {error}"))?;
+        batch.clear();
+    }
+
+    let mut batch = LlamaBatch::new(1, 1);
 
     let sampler = if temperature > 0.01 {
         LlamaSampler::chain_simple([
@@ -194,7 +209,7 @@ fn generate(
     let mut sampler = sampler;
 
     let mut output = Vec::new();
-    for position in (tokens.len() as i32..).take(MAX_TOKENS as usize) {
+    for position in (tokens.len() as i32..).take(LOCAL_MAX_OUTPUT_TOKENS) {
         let token = sampler.sample(&context, -1);
         if vocab.is_eog(token) {
             break;

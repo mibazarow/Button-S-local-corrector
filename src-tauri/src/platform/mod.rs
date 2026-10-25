@@ -41,6 +41,19 @@ pub struct SelectionInfo {
     pub end: (f64, f64),
 }
 
+#[derive(Debug, Clone)]
+pub struct SelectionFailure {
+    pub reason: String,
+    pub role: String,
+    pub editable: Option<bool>,
+}
+
+pub fn drag_exceeded(start: (f64, f64), end: (f64, f64)) -> bool {
+    let dx = end.0 - start.0;
+    let dy = end.1 - start.1;
+    dx * dx + dy * dy > 25.0
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyEvent {
     Char(char),
@@ -70,12 +83,26 @@ pub fn ax_context(max_before: usize) -> Option<AxContext> {
 }
 
 #[cfg(target_os = "macos")]
-pub fn selection_info() -> Option<SelectionInfo> {
+pub fn selection_info() -> Result<SelectionInfo, SelectionFailure> {
     macos::selection_info()
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn selection_info() -> Option<SelectionInfo> {
+pub fn selection_info() -> Result<SelectionInfo, SelectionFailure> {
+    Err(SelectionFailure {
+        reason: "not supported".into(),
+        role: String::new(),
+        editable: None,
+    })
+}
+
+#[cfg(target_os = "macos")]
+pub fn mouse_location() -> Option<(f64, f64)> {
+    macos::mouse_location()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn mouse_location() -> Option<(f64, f64)> {
     None
 }
 

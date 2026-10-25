@@ -10,7 +10,49 @@ use crate::config::{Llm, Provider};
 /// Системный промпт для всех провайдеров: короткий, чтобы префил был
 /// минимальным. `/no_think` отключает размышления Qwen3.
 pub const SYSTEM_PROMPT: &str =
-    "Ты — аккуратный помощник по работе с текстом. Возвращай только итоговый текст.";
+    "You are a text editor. Return ONLY the final text, with no introductions, explanations, labels, quotation marks, or markdown. Do not answer the text; perform the instruction on it. Write the result in the same language as the source text unless the instruction explicitly asks for translation.";
+
+/// Человекочитаемое имя языка по коду.
+pub fn language_name(code: Option<&str>) -> Option<&'static str> {
+    match code {
+        Some("ru") => Some("Russian"),
+        Some("en") => Some("English"),
+        _ => None,
+    }
+}
+
+/// Языковая директива для промптов без явного перевода: результат должен
+/// остаться на языке исходного текста.
+pub fn language_rule(text: &str) -> String {
+    match language_name(crate::platform::language_for_text(text)) {
+        Some(name) => format!(
+            "Source language: {name}. Unless the instruction explicitly asks for translation, write the result in {name}."
+        ),
+        None => "Unless the instruction explicitly asks for translation, write the result in the same language as the source text.".to_string(),
+    }
+}
+
+pub(crate) const CLOUD_MAX_INPUT_TOKENS: usize = 10_000;
+pub(crate) const CLOUD_MAX_OUTPUT_TOKENS: usize = 10_000;
+
+pub(crate) fn estimate_tokens(text: &str) -> usize {
+    let mut total = 0.0f64;
+    for ch in text.chars() {
+        let weight = if ch.is_ascii_alphanumeric() {
+            0.27
+        } else if ch.is_ascii_whitespace() {
+            0.10
+        } else if ('\u{0400}'..='\u{04FF}').contains(&ch) {
+            0.42
+        } else if ch >= '\u{2E80}' {
+            1.0
+        } else {
+            0.45
+        };
+        total += weight;
+    }
+    total.ceil().max(1.0) as usize
+}
 
 /// Reasoning-моделям OpenAI просим минимум размышлений: текстовые задачи
 /// их не требуют, а ответы становятся быстрее и дешевле.
@@ -67,7 +109,7 @@ pub fn with_note(filled: &str, note: &str) -> String {
     if note.is_empty() {
         return filled.to_string();
     }
-    format!("{filled}\n\nДополнительное указание от пользователя: {note}")
+    format!("{filled}\n\nAdditional user instruction: {note}")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -88,8 +130,16 @@ impl PromptStore {
             .unwrap_or_default();
 
         for builtin in builtin_prompts() {
-            if !store.prompts.iter().any(|prompt| prompt.id == builtin.id) {
-                store.prompts.push(builtin);
+            match store
+                .prompts
+                .iter_mut()
+                .find(|prompt| prompt.id == builtin.id)
+            {
+                Some(existing) => {
+                    existing.template = builtin.template;
+                    existing.description = builtin.description;
+                }
+                None => store.prompts.push(builtin),
             }
         }
         store
@@ -137,49 +187,49 @@ pub fn builtin_prompts() -> Vec<Prompt> {
             "fix-grammar",
             "Исправить орфографию",
             "Fix spelling and grammar",
-            "Исправь орфографию, пунктуацию и опечатки. Верни только исправленный текст без пояснений.\n\n{{text}}",
+            "Fix spelling, punctuation, and typos. Return only the corrected text without explanations.\n\n{{text}}",
             "Command+Alt+KeyF",
         ),
         (
             "shorten",
             "Сократить",
             "Shorten",
-            "Сократи текст, сохранив смысл. Верни только результат.\n\n{{text}}",
+            "Shorten the text while preserving its meaning. Return only the result.\n\n{{text}}",
             "",
         ),
         (
             "formal",
             "Переписать официально",
             "Rewrite formally",
-            "Перепиши текст в официально-деловом стиле. Верни только результат.\n\n{{text}}",
+            "Rewrite the text in a formal business style. Return only the result.\n\n{{text}}",
             "",
         ),
         (
             "rephrase",
             "Перефразировать",
             "Rephrase",
-            "Перефразируй текст другими словами, сохранив смысл и тон. Верни только результат.\n\n{{text}}",
+            "Rephrase the text in different words while preserving its meaning and tone. Return only the result.\n\n{{text}}",
             "",
         ),
         (
             "improve",
             "Улучшить",
             "Improve",
-            "Улучши текст: сделай его яснее, грамотнее и естественнее, сохрани смысл и стиль. Верни только результат.\n\n{{text}}",
+            "Improve the text: make it clearer, more correct, and more natural while preserving its meaning and style. Return only the result.\n\n{{text}}",
             "",
         ),
         (
             "summarize",
             "Суммировать",
             "Summarize",
-            "Сделай краткое резюме текста в 3–5 пунктах. Верни только результат.\n\n{{text}}",
+            "Summarize the text in 3-5 bullet points. Return only the summary.\n\n{{text}}",
             "",
         ),
         (
             "reply-email",
             "Ответить на письмо",
             "Reply to email",
-            "Напиши вежливый ответ на это письмо. Верни только текст ответа.\n\n{{text}}",
+            "Write a polite reply to this email. Return only the reply text.\n\n{{text}}",
             "",
         ),
     ]
@@ -502,6 +552,15 @@ pub async fn complete(
         model_override
     };
 
+    if provider.kind != "local" {
+        let estimated = estimate_tokens(prompt) + 64;
+        if estimated > CLOUD_MAX_INPUT_TOKENS {
+            return Err(format!(
+                "Текст слишком длинный: ~{estimated} токенов при лимите 10 000. Сократите текст."
+            ));
+        }
+    }
+
     if provider.kind == "local" {
         return crate::llm_local::complete(model, prompt, temperature).await;
     }
@@ -514,6 +573,8 @@ pub async fn complete(
     match provider.kind.as_str() {
         "ollama" => {
             let url = format!("{}/api/generate", provider.base_url.trim_end_matches('/'));
+            let num_ctx =
+                (estimate_tokens(prompt) + CLOUD_MAX_OUTPUT_TOKENS + 128).clamp(2048, 32768);
             let response = client
                 .post(url)
                 .json(&json!({
@@ -523,7 +584,11 @@ pub async fn complete(
                     "system": SYSTEM_PROMPT,
                     // размышления выключены: текстовые задачи их не требуют
                     "think": false,
-                    "options": { "temperature": temperature }
+                    "options": {
+                        "temperature": temperature,
+                        "num_predict": CLOUD_MAX_OUTPUT_TOKENS,
+                        "num_ctx": num_ctx
+                    }
                 }))
                 .send()
                 .await
@@ -559,7 +624,7 @@ pub async fn complete(
                 .header("anthropic-version", "2023-06-01")
                 .json(&json!({
                     "model": model,
-                    "max_tokens": 4096,
+                    "max_tokens": CLOUD_MAX_OUTPUT_TOKENS,
                     "temperature": temperature,
                     "system": SYSTEM_PROMPT,
                     "messages": [{ "role": "user", "content": prompt }]
@@ -601,6 +666,9 @@ pub async fn complete(
             });
             if let Some(effort) = reasoning_effort_for(model) {
                 body["reasoning_effort"] = json!(effort);
+                body["max_completion_tokens"] = json!(CLOUD_MAX_OUTPUT_TOKENS);
+            } else {
+                body["max_tokens"] = json!(CLOUD_MAX_OUTPUT_TOKENS);
             }
             let mut request = client.post(url).json(&body);
 
@@ -672,6 +740,169 @@ fn now_millis() -> u128 {
         .unwrap_or(0)
 }
 
+const LEADING_META_PREFIXES: &[&str] = &[
+    "вот",
+    "конечно",
+    "готовый текст",
+    "исправленный текст",
+    "результат",
+    "перевод",
+    "here is",
+    "sure",
+    "certainly",
+    "the corrected",
+    "translation",
+];
+
+const LEADING_META_INTROS: &[&str] = &["конечно!", "sure!", "sure.", "certainly!"];
+
+const TRAILING_META_PREFIXES: &[&str] = &[
+    "если нужно",
+    "if you need",
+    "надеюсь",
+    "let me know",
+];
+
+const QUOTE_PAIRS: &[(char, char)] = &[('“', '”'), ('«', '»'), ('"', '"'), ('\'', '\'')];
+
+/// Убирает обёртки модели: fences, JSON-поле, служебные вступления и кавычки.
+pub fn clean_output(raw: &str) -> String {
+    let text = strip_code_fence(raw.trim());
+    let text = match json_text_field(&text) {
+        Some(value) => strip_code_fence(value.trim()),
+        None => text,
+    };
+    let text = strip_leading_meta(&text);
+    let text = strip_trailing_meta(&text);
+    strip_wrapping_quotes(&text)
+}
+
+fn strip_code_fence(text: &str) -> String {
+    let trimmed = text.trim();
+    if trimmed.len() < 6 || !trimmed.starts_with("```") || !trimmed.ends_with("```") {
+        return trimmed.to_string();
+    }
+
+    let inner = &trimmed[3..trimmed.len() - 3];
+    let inner = match inner.find('\n') {
+        Some(index)
+            if inner[..index]
+                .trim()
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '+' | '-' | '_' | '.')) =>
+        {
+            &inner[index + 1..]
+        }
+        _ => inner,
+    };
+    inner.trim().to_string()
+}
+
+fn json_text_field(text: &str) -> Option<String> {
+    if !text.starts_with('{') || !text.ends_with('}') {
+        return None;
+    }
+    let value: serde_json::Value = serde_json::from_str(text).ok()?;
+    let object = value.as_object()?;
+    for key in ["text", "result", "translation", "improved", "corrected"] {
+        if let Some(field) = object.get(key).and_then(|value| value.as_str()) {
+            let field = field.trim();
+            if !field.is_empty() {
+                return Some(field.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn split_first_line(text: &str) -> Option<(&str, &str)> {
+    let trimmed = text.trim_start();
+    if trimmed.is_empty() {
+        return None;
+    }
+    match trimmed.find('\n') {
+        Some(index) => Some((&trimmed[..index], &trimmed[index + 1..])),
+        None => Some((trimmed, "")),
+    }
+}
+
+fn is_leading_meta_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let lower = trimmed.to_lowercase();
+    if !LEADING_META_PREFIXES
+        .iter()
+        .any(|prefix| lower.starts_with(prefix))
+    {
+        return false;
+    }
+    trimmed.ends_with(':') || LEADING_META_INTROS.contains(&lower.as_str())
+}
+
+fn strip_leading_meta(text: &str) -> String {
+    let mut remaining = text.trim();
+    let mut dropped = 0;
+    while dropped < 2 {
+        let Some((line, rest)) = split_first_line(remaining) else {
+            break;
+        };
+        let rest = rest.trim_start();
+        if rest.is_empty() || !is_leading_meta_line(line) {
+            break;
+        }
+        remaining = rest;
+        dropped += 1;
+    }
+    remaining.trim().to_string()
+}
+
+fn strip_trailing_meta(text: &str) -> String {
+    let trimmed = text.trim();
+    let Some(index) = trimmed.rfind("\n\n") else {
+        return trimmed.to_string();
+    };
+    let before = trimmed[..index].trim_end();
+    let last = trimmed[index + 2..].trim_start();
+    if before.is_empty() {
+        return trimmed.to_string();
+    }
+    let lower = last.to_lowercase();
+    if TRAILING_META_PREFIXES
+        .iter()
+        .any(|prefix| lower.starts_with(prefix))
+    {
+        before.to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn strip_wrapping_quotes(text: &str) -> String {
+    let trimmed = text.trim();
+    let Some(first) = trimmed.chars().next() else {
+        return String::new();
+    };
+    let Some(last) = trimmed.chars().last() else {
+        return trimmed.to_string();
+    };
+    if trimmed.chars().count() < 2 {
+        return trimmed.to_string();
+    }
+    for (open, close) in QUOTE_PAIRS {
+        if first != *open || last != *close {
+            continue;
+        }
+        let inner = &trimmed[first.len_utf8()..trimmed.len() - last.len_utf8()];
+        let inner = inner.trim();
+        if !inner.is_empty() {
+            return inner.to_string();
+        }
+    }
+    trimmed.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -705,13 +936,194 @@ mod tests {
     }
 
     #[test]
-    fn note_is_appended_to_filled_prompt() {
-        assert_eq!(with_note("Сократи: текст", ""), "Сократи: текст");
-        assert_eq!(with_note("Сократи: текст", "  "), "Сократи: текст");
-        assert_eq!(
-            with_note("Сократи: текст", "короче и вежливее"),
-            "Сократи: текст\n\nДополнительное указание от пользователя: короче и вежливее"
+    fn estimate_tokens_handles_empty_and_short_text() {
+        assert_eq!(estimate_tokens(""), 1);
+        assert_eq!(estimate_tokens("a"), 1);
+        assert_eq!(estimate_tokens("1"), 1);
+    }
+
+    #[test]
+    fn estimate_tokens_counts_cyrillic() {
+        let estimated = estimate_tokens(&"а".repeat(1000));
+        assert!(
+            (350..600).contains(&estimated),
+            "1000 Cyrillic chars -> {estimated}"
         );
+    }
+
+    #[test]
+    fn estimate_tokens_counts_ascii_letters() {
+        let estimated = estimate_tokens(&"a".repeat(1000));
+        assert!(
+            (180..400).contains(&estimated),
+            "1000 ASCII letters -> {estimated}"
+        );
+    }
+
+    #[test]
+    fn estimate_tokens_handles_mixed_text() {
+        let text = format!("{}{}", "а".repeat(500), "a".repeat(500));
+        let estimated = estimate_tokens(&text);
+        assert!(
+            (300..400).contains(&estimated),
+            "mixed 500 Cyrillic + 500 ASCII -> {estimated}"
+        );
+    }
+
+    #[test]
+    fn note_is_appended_to_filled_prompt() {
+        assert_eq!(with_note("Shorten: text", ""), "Shorten: text");
+        assert_eq!(with_note("Shorten: text", "  "), "Shorten: text");
+        assert_eq!(
+            with_note("Shorten: text", "shorter and polite"),
+            "Shorten: text\n\nAdditional user instruction: shorter and polite"
+        );
+    }
+
+    #[test]
+    fn language_name_maps_known_codes_only() {
+        assert_eq!(language_name(Some("ru")), Some("Russian"));
+        assert_eq!(language_name(Some("en")), Some("English"));
+        assert_eq!(language_name(Some("de")), None);
+        assert_eq!(language_name(None), None);
+    }
+
+    #[test]
+    fn language_rule_names_russian_source() {
+        assert_eq!(
+            language_rule("Привет, мир"),
+            "Source language: Russian. Unless the instruction explicitly asks for translation, write the result in Russian."
+        );
+    }
+
+    #[test]
+    fn language_rule_names_english_source() {
+        assert_eq!(
+            language_rule("Hello, world"),
+            "Source language: English. Unless the instruction explicitly asks for translation, write the result in English."
+        );
+    }
+
+    #[test]
+    fn language_rule_falls_back_for_unknown_source() {
+        assert_eq!(
+            language_rule("123 !!!"),
+            "Unless the instruction explicitly asks for translation, write the result in the same language as the source text."
+        );
+    }
+
+    #[test]
+    fn builtin_prompt_templates_are_ascii() {
+        for prompt in builtin_prompts() {
+            assert!(
+                prompt.template.is_ascii(),
+                "builtin {} template is not ASCII: {}",
+                prompt.id,
+                prompt.template
+            );
+        }
+    }
+
+    #[test]
+    fn load_refreshes_builtin_templates_but_keeps_user_prompts() {
+        let dir = std::env::temp_dir().join(format!("button-s-prompts-{}", now_millis()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = PromptStore::path_in(&dir);
+        let mut stale = builtin_prompts();
+        stale[0].template = "Старый шаблон".into();
+        stale[0].name = "Моё имя".into();
+        let user = Prompt {
+            id: "user-custom".into(),
+            template: "Переведи: {{text}}".into(),
+            ..Prompt::default()
+        };
+        let store = PromptStore {
+            prompts: {
+                let mut prompts = stale;
+                prompts.push(user);
+                prompts
+            },
+        };
+        store.save(&path).expect("save");
+
+        let loaded = PromptStore::load(&path);
+        let refreshed = loaded.get("fix-grammar").expect("builtin");
+        assert_eq!(
+            refreshed.template,
+            builtin_prompts()[0].template
+        );
+        assert_eq!(refreshed.name, "Моё имя");
+        assert_eq!(
+            loaded.get("user-custom").map(|prompt| prompt.template.as_str()),
+            Some("Переведи: {{text}}")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn clean_output_keeps_plain_text() {
+        assert_eq!(clean_output("  Привет, мир.  "), "Привет, мир.");
+    }
+
+    #[test]
+    fn clean_output_strips_code_fence() {
+        assert_eq!(clean_output("```text\nГотово\n```"), "Готово");
+        assert_eq!(clean_output("```\nГотово\n```"), "Готово");
+    }
+
+    #[test]
+    fn clean_output_extracts_json_text_field() {
+        assert_eq!(
+            clean_output(r#"{"text": "Исправленный текст"}"#),
+            "Исправленный текст"
+        );
+        assert_eq!(clean_output(r#"{"translation": "Hello"}"#), "Hello");
+    }
+
+    #[test]
+    fn clean_output_drops_russian_preamble_line() {
+        assert_eq!(
+            clean_output("Вот исправленный текст:\n\nПривет, мир."),
+            "Привет, мир."
+        );
+        assert_eq!(clean_output("Конечно!\nПривет, мир."), "Привет, мир.");
+    }
+
+    #[test]
+    fn clean_output_drops_english_preamble_line() {
+        assert_eq!(
+            clean_output("Here is the corrected text:\n\nHello, world."),
+            "Hello, world."
+        );
+        assert_eq!(clean_output("Sure!\nHello, world."), "Hello, world.");
+    }
+
+    #[test]
+    fn clean_output_drops_trailing_if_needed_paragraph() {
+        assert_eq!(
+            clean_output("Привет, мир.\n\nЕсли нужно, могу сделать короче."),
+            "Привет, мир."
+        );
+        assert_eq!(
+            clean_output("Hello.\n\nLet me know if you need more."),
+            "Hello."
+        );
+    }
+
+    #[test]
+    fn clean_output_strips_wrapping_quotes() {
+        assert_eq!(clean_output("«Привет, мир»"), "Привет, мир");
+        assert_eq!(clean_output("“Hello”"), "Hello");
+        assert_eq!(clean_output("\"Hello\""), "Hello");
+    }
+
+    #[test]
+    fn clean_output_keeps_preamble_like_text() {
+        assert_eq!(
+            clean_output("Вот дом, который построил Джек."),
+            "Вот дом, который построил Джек."
+        );
+        assert_eq!(clean_output("Результат:"), "Результат:");
     }
 
     /// Мини HTTP-сервер: отвечает заготовленным JSON по точному пути, иначе 404.

@@ -270,19 +270,15 @@ pub async fn run_prompt(
     {
         return Err("ИИ выключен для этого приложения".into());
     }
-    let (provider, max_input) = {
+    let provider = {
         let config = state.config.read();
-        let provider = llm::resolve_prompt(&prompt, &config.llm)?.clone();
-        (provider, config.llm.max_input_chars)
+        llm::resolve_prompt(&prompt, &config.llm)?.clone()
     };
-
-    if text.chars().count() > max_input {
-        return Err(format!("Текст длиннее {max_input} символов"));
-    }
 
     let language = platform::language_for_text(&text).unwrap_or("ru");
     let filled = llm::fill_template(&prompt.template, &text, language, &app_id);
     let filled = llm::with_note(&filled, &prompt.note);
+    let filled = format!("{filled}\n\n{}", llm::language_rule(&text));
 
     state.emit_event(
         "action-state",
@@ -303,6 +299,7 @@ pub async fn run_prompt(
     );
 
     let result = result?;
+    let result = llm::clean_output(&result);
     if result.is_empty() {
         return Err("Провайдер вернул пустой ответ".into());
     }
@@ -351,28 +348,22 @@ pub async fn translate(
     {
         return Err("ИИ выключен для этого приложения".into());
     }
-    let (provider, max_input, output) = {
+    let (provider, output) = {
         let config = state.config.read();
         let provider = llm::provider_for(&config.llm, "")?.clone();
-        (
-            provider,
-            config.llm.max_input_chars,
-            config.translate.output.clone(),
-        )
+        (provider, config.translate.output.clone())
     };
 
-    if text.chars().count() > max_input {
-        return Err(format!("Текст длиннее {max_input} символов"));
-    }
-
-    let (target_name, direction) = match target {
-        "ru" => ("русский", "на русский"),
-        "en" => ("English", "into English"),
-        _ => ("английский", "to English"),
+    let target_name = match target {
+        "ru" => "Russian",
+        "en" => "English",
+        _ => "English",
     };
+    let source = llm::language_name(platform::language_for_text(&text))
+        .unwrap_or("the source language");
 
     let prompt = format!(
-        "Переведи текст {direction} ({target_name}). Сохрани абзацы, списки и переносы строк. Верни только перевод без пояснений.\n\n{text}"
+        "Translate the following text into {target_name}. Preserve paragraphs, lists, and line breaks. Return only the translation, with no explanations.\nSource language: {source}. Output language: {target_name}.\n\n{text}"
     );
 
     state.emit_event(
@@ -386,6 +377,7 @@ pub async fn translate(
     );
 
     let result = result?;
+    let result = llm::clean_output(&result);
     state.diag(&format!(
         "ai translate done: {} chars",
         result.chars().count()

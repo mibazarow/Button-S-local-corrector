@@ -57,6 +57,10 @@ pub struct AppState {
     pub selection_menu_open: AtomicBool,
     pub selection_menu_since: Mutex<Option<Instant>>,
     pub selection_dismissed: Mutex<Option<String>>,
+    pub selection_dismiss_gen: AtomicU64,
+    pub mouse_release_pending: AtomicBool,
+    pub mouse_drag_start: Mutex<Option<(f64, f64)>>,
+    pub mouse_dragged: AtomicBool,
     pub selection_suppress_until: Mutex<Option<Instant>>,
     app: RwLock<Option<AppHandle>>,
 }
@@ -122,6 +126,10 @@ impl AppState {
             selection_menu_open: AtomicBool::new(false),
             selection_menu_since: Mutex::new(None),
             selection_dismissed: Mutex::new(None),
+            selection_dismiss_gen: AtomicU64::new(0),
+            mouse_release_pending: AtomicBool::new(false),
+            mouse_drag_start: Mutex::new(None),
+            mouse_dragged: AtomicBool::new(false),
             selection_suppress_until: Mutex::new(None),
             app: RwLock::new(None),
         }

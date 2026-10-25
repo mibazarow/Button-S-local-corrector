@@ -12,7 +12,7 @@ use core_foundation::string::CFString;
 use core_foundation_sys::base::{CFRelease, CFTypeRef};
 use core_foundation_sys::number::{CFBooleanGetTypeID, CFBooleanGetValue, CFBooleanRef};
 
-use crate::platform::{AxContext, SelectionInfo};
+use crate::platform::{AxContext, SelectionFailure, SelectionInfo};
 use ffi::*;
 
 pub fn frontmost_bundle_id() -> Option<String> {
@@ -29,6 +29,18 @@ pub fn mouse_button_down() -> bool {
             KCG_EVENT_SOURCE_STATE_COMBINED_SESSION_STATE,
             KCG_MOUSE_BUTTON_LEFT,
         )
+    }
+}
+
+pub fn mouse_location() -> Option<(f64, f64)> {
+    unsafe {
+        let event = CGEventCreate(ptr::null_mut());
+        if event.is_null() {
+            return None;
+        }
+        let point = CGEventGetLocation(event);
+        CFRelease(event as *const c_void);
+        Some((point.x, point.y))
     }
 }
 
@@ -134,15 +146,21 @@ fn valid_bounds(rect: CGRect) -> Option<(f64, f64)> {
     }
 }
 
-pub fn selection_info() -> Option<SelectionInfo> {
+pub fn selection_info() -> Result<SelectionInfo, SelectionFailure> {
+    let unavailable = |reason: &str| SelectionFailure {
+        reason: reason.to_string(),
+        role: String::new(),
+        editable: None,
+    };
+
     if !permissions::accessibility() {
-        return None;
+        return Err(unavailable("no accessibility"));
     }
 
     unsafe {
         let system = AXUIElementCreateSystemWide();
         if system.is_null() {
-            return None;
+            return Err(unavailable("no accessibility"));
         }
 
         let focused_attr = CFString::new("AXFocusedUIElement");
@@ -154,34 +172,47 @@ pub fn selection_info() -> Option<SelectionInfo> {
         );
         CFRelease(system as *const c_void);
         if focused_err != 0 || focused_ptr.is_null() {
-            return None;
+            return Err(unavailable("no focused element"));
         }
         let focused = focused_ptr as AXUIElementRef;
 
         let result = (|| {
-            let role = copy_string_attribute(focused, "AXRole");
-            if let Some(role) = role.as_deref() {
-                if matches!(
-                    role,
-                    "AXStaticText" | "AXHeading" | "AXLink" | "AXImage" | "AXButton"
-                ) {
-                    return None;
-                }
-                if role == "AXWebArea" && copy_bool_attribute(focused, "AXEditable") != Some(true) {
-                    return None;
-                }
+            let role = copy_string_attribute(focused, "AXRole")
+                .unwrap_or_else(|| "AXUnknown".to_string());
+            let editable = copy_bool_attribute(focused, "AXEditable");
+            let failure = |reason: String| SelectionFailure {
+                reason,
+                role: role.clone(),
+                editable,
+            };
+
+            if matches!(
+                role.as_str(),
+                "AXStaticText"
+                    | "AXHeading"
+                    | "AXLink"
+                    | "AXImage"
+                    | "AXButton"
+                    | "AXWindow"
+            ) {
+                return Err(failure(format!("role {role} not editable")));
             }
-            if copy_bool_attribute(focused, "AXEditable") == Some(false) {
-                return None;
+            if role == "AXWebArea" && editable != Some(true) {
+                return Err(failure(format!("role {role} not editable")));
+            }
+            if editable == Some(false) {
+                return Err(failure("editable=false".into()));
             }
 
-            let text = copy_string_attribute(focused, "AXSelectedText")?;
+            let text = copy_string_attribute(focused, "AXSelectedText")
+                .ok_or_else(|| failure(format!("no AXSelectedText (role {role})")))?;
             if text.trim().is_empty() {
-                return None;
+                return Err(failure(format!("empty selection (role {role})")));
             }
-            let range = copy_range_attribute(focused, "AXSelectedTextRange")?;
+            let range = copy_range_attribute(focused, "AXSelectedTextRange")
+                .ok_or_else(|| failure(format!("no AXSelectedTextRange (role {role})")))?;
             if range.location < 0 || range.length < 0 {
-                return None;
+                return Err(failure(format!("no AXSelectedTextRange (role {role})")));
             }
 
             let caret = CFRange {
@@ -190,9 +221,10 @@ pub fn selection_info() -> Option<SelectionInfo> {
             };
             let end = bounds_for_range(focused, caret)
                 .and_then(valid_bounds)
-                .or_else(|| bounds_for_range(focused, range).and_then(valid_bounds))?;
+                .or_else(|| bounds_for_range(focused, range).and_then(valid_bounds))
+                .ok_or_else(|| failure(format!("no AXBoundsForRange (role {role})")))?;
 
-            Some(SelectionInfo { text, end })
+            Ok(SelectionInfo { text, end })
         })();
 
         CFRelease(focused as *const c_void);

@@ -27,16 +27,6 @@ pub struct VoiceModelSpec {
 
 pub const VOICE_MODELS: &[VoiceModelSpec] = &[
     VoiceModelSpec {
-        id: "tiny",
-        file: "ggml-tiny.bin",
-        size_bytes: 77_691_713,
-    },
-    VoiceModelSpec {
-        id: "base",
-        file: "ggml-base.bin",
-        size_bytes: 147_951_465,
-    },
-    VoiceModelSpec {
         id: "small",
         file: "ggml-small.bin",
         size_bytes: 487_601_967,
@@ -100,7 +90,7 @@ pub fn model_path(state: &AppState) -> PathBuf {
     if !configured.is_empty() {
         return PathBuf::from(configured);
     }
-    models_dir(state).join("ggml-base.bin")
+    models_dir(state).join("ggml-small.bin")
 }
 
 pub fn model_status(state: &AppState) -> VoiceModelStatus {
@@ -827,30 +817,36 @@ mod tests {
     }
 
     #[test]
+    fn catalog_contains_only_small_medium_and_turbo() {
+        let ids: Vec<&str> = VOICE_MODELS.iter().map(|spec| spec.id).collect();
+        assert_eq!(ids, ["small", "medium", "large-v3-turbo"]);
+    }
+
+    #[test]
     fn lists_and_switches_models() {
         let (state, dir) = temp_state("models");
 
         let views = list_models(&state);
-        assert_eq!(views.len(), 5);
+        assert_eq!(views.len(), 3);
         assert!(views.iter().all(|view| !view.downloaded && !view.active));
 
-        let tiny = dir.join(MODEL_DIR).join("ggml-tiny.bin");
-        std::fs::create_dir_all(tiny.parent().unwrap()).unwrap();
-        std::fs::File::create(&tiny)
+        let small = dir.join(MODEL_DIR).join("ggml-small.bin");
+        std::fs::create_dir_all(small.parent().unwrap()).unwrap();
+        std::fs::File::create(&small)
             .unwrap()
             .set_len(11_000_000)
             .unwrap();
 
-        use_model(&state, "tiny").expect("switch to tiny");
+        use_model(&state, "small").expect("switch to small");
         let views = list_models(&state);
-        let tiny_view = views.iter().find(|view| view.id == "tiny").unwrap();
-        assert!(tiny_view.downloaded && tiny_view.active);
+        let small_view = views.iter().find(|view| view.id == "small").unwrap();
+        assert!(small_view.downloaded && small_view.active);
         assert_eq!(
             state.config.read().voice.model,
-            tiny.to_string_lossy().to_string()
+            small.to_string_lossy().to_string()
         );
 
-        assert!(use_model(&state, "small").is_err());
+        assert!(use_model(&state, "medium").is_err());
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -859,19 +855,19 @@ mod tests {
     fn deletes_downloaded_model_and_clears_active() {
         let (state, dir) = temp_state("delete");
 
-        let tiny = dir.join(MODEL_DIR).join("ggml-tiny.bin");
-        std::fs::create_dir_all(tiny.parent().unwrap()).unwrap();
-        std::fs::File::create(&tiny)
+        let small = dir.join(MODEL_DIR).join("ggml-small.bin");
+        std::fs::create_dir_all(small.parent().unwrap()).unwrap();
+        std::fs::File::create(&small)
             .unwrap()
             .set_len(11_000_000)
             .unwrap();
-        use_model(&state, "tiny").expect("switch to tiny");
+        use_model(&state, "small").expect("switch to small");
 
-        let views = delete_model(&state, "tiny").expect("delete tiny");
-        let tiny_view = views.iter().find(|view| view.id == "tiny").unwrap();
-        assert!(!tiny_view.downloaded);
-        assert!(!tiny_view.active);
-        assert!(!tiny.exists());
+        let views = delete_model(&state, "small").expect("delete small");
+        let small_view = views.iter().find(|view| view.id == "small").unwrap();
+        assert!(!small_view.downloaded);
+        assert!(!small_view.active);
+        assert!(!small.exists());
         assert_eq!(state.config.read().voice.model, "");
 
         let _ = std::fs::remove_dir_all(&dir);

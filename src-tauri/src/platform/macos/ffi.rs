@@ -21,6 +21,9 @@ pub type CGEventTapCallBack = extern "C" fn(
     user_info: *mut c_void,
 ) -> CGEventRef;
 
+pub const KCG_EVENT_LEFT_MOUSE_DOWN: u32 = 1;
+pub const KCG_EVENT_LEFT_MOUSE_UP: u32 = 2;
+pub const KCG_EVENT_LEFT_MOUSE_DRAGGED: u32 = 6;
 pub const KCG_EVENT_KEY_DOWN: u32 = 10;
 pub const KCG_EVENT_FLAGS_CHANGED: u32 = 12;
 pub const KCG_EVENT_TAP_DISABLED_BY_TIMEOUT: u32 = 0xFFFF_FFFE;
@@ -87,6 +90,8 @@ extern "C" {
         user_info: *mut c_void,
     ) -> CFMachPortRef;
     pub fn CGEventTapEnable(tap: CFMachPortRef, enable: bool);
+    pub fn CGEventCreate(source: *mut c_void) -> CGEventRef;
+    pub fn CGEventGetLocation(event: CGEventRef) -> CGPoint;
     pub fn CGEventGetIntegerValueField(event: CGEventRef, field: u32) -> i64;
     pub fn CGEventGetFlags(event: CGEventRef) -> u64;
     pub fn CGEventKeyboardGetUnicodeString(

@@ -34,8 +34,6 @@
 
   const modelMeta: Record<string, { name: string; desc: string; pro: string; con: string }> =
     $derived({
-      tiny: { name: t.modelTiny, desc: t.modelTinyDesc, pro: t.modelTinyPro, con: t.modelTinyCon },
-      base: { name: t.modelBase, desc: t.modelBaseDesc, pro: t.modelBasePro, con: t.modelBaseCon },
       small: { name: t.modelSmall, desc: t.modelSmallDesc, pro: t.modelSmallPro, con: t.modelSmallCon },
       medium: { name: t.modelMedium, desc: t.modelMediumDesc, pro: t.modelMediumPro, con: t.modelMediumCon },
       "large-v3-turbo": { name: t.modelLarge, desc: t.modelLargeDesc, pro: t.modelLargePro, con: t.modelLargeCon },

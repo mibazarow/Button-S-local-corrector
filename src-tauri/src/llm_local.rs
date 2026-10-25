@@ -28,20 +28,8 @@ pub struct LocalLlmSpec {
     pub size_bytes: u64,
 }
 
-/// Каталог локальных моделей: от лёгкой к максимальной.
+/// Каталог встроенных локальных моделей.
 pub const LOCAL_LLM_MODELS: &[LocalLlmSpec] = &[
-    LocalLlmSpec {
-        id: "gemma-3-270m",
-        file: "gemma-3-270m-it-Q4_K_M.gguf",
-        url: "https://huggingface.co/unsloth/gemma-3-270m-it-GGUF/resolve/main/gemma-3-270m-it-Q4_K_M.gguf",
-        size_bytes: 253_115_424,
-    },
-    LocalLlmSpec {
-        id: "vikhr-qwen-0.5b",
-        file: "Vikhr-Qwen-2.5-0.5B-instruct-Q4_K_M.gguf",
-        url: "https://huggingface.co/Vikhrmodels/Vikhr-Qwen-2.5-0.5B-instruct-GGUF/resolve/main/Vikhr-Qwen-2.5-0.5B-instruct-Q4_K_M.gguf",
-        size_bytes: 397_543_680,
-    },
     LocalLlmSpec {
         id: "vikhr-llama-1b",
         file: "Vikhr-Llama-3.2-1B-Q4_K_M.gguf",
@@ -49,24 +37,17 @@ pub const LOCAL_LLM_MODELS: &[LocalLlmSpec] = &[
         size_bytes: 807_694_432,
     },
     LocalLlmSpec {
-        id: "qwen3-1.7b",
-        file: "Qwen3-1.7B-Q4_K_M.gguf",
-        url: "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf",
-        size_bytes: 1_107_409_472,
-    },
-    LocalLlmSpec {
         id: "vikhr-gemma-2b",
         file: "Vikhr-Gemma-2B-instruct-Q4_K_M.gguf",
         url: "https://huggingface.co/Vikhrmodels/Vikhr-Gemma-2B-instruct-GGUF/resolve/main/Vikhr-Gemma-2B-instruct-Q4_K_M.gguf",
         size_bytes: 1_708_582_848,
     },
-    LocalLlmSpec {
-        id: "qwen3-4b",
-        file: "Qwen3-4B-Q4_K_M.gguf",
-        url: "https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf",
-        size_bytes: 2_497_280_256,
-    },
 ];
+
+/// Проверяет, входит ли модель во встроенный каталог.
+pub fn is_known_model(id: &str) -> bool {
+    LOCAL_LLM_MODELS.iter().any(|spec| spec.id == id)
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -436,9 +417,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn catalog_is_sorted_by_size() {
-        let sizes: Vec<u64> = LOCAL_LLM_MODELS.iter().map(|m| m.size_bytes).collect();
-        assert_eq!(sizes.len(), 6);
-        assert!(sizes.windows(2).all(|pair| pair[0] < pair[1]));
+    fn catalog_has_exactly_two_models_in_order() {
+        let ids: Vec<&str> = LOCAL_LLM_MODELS.iter().map(|m| m.id).collect();
+        assert_eq!(ids, vec!["vikhr-llama-1b", "vikhr-gemma-2b"]);
+    }
+
+    #[test]
+    fn is_known_model_matches_catalog() {
+        assert!(is_known_model("vikhr-llama-1b"));
+        assert!(is_known_model("vikhr-gemma-2b"));
+        assert!(!is_known_model("qwen3-1.7b"));
+        assert!(!is_known_model("vikhr-qwen-0.5b"));
     }
 }

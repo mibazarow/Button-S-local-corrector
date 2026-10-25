@@ -36,18 +36,6 @@
     string,
     { name: string; desc: string; pro: string; con: string }
   > = $derived({
-    "gemma-3-270m": {
-      name: t.localLlmGemma,
-      desc: t.localLlmGemmaDesc,
-      pro: t.localLlmGemmaPro,
-      con: t.localLlmGemmaCon,
-    },
-    "vikhr-qwen-0.5b": {
-      name: t.localLlmVikhr05,
-      desc: t.localLlmVikhr05Desc,
-      pro: t.localLlmVikhr05Pro,
-      con: t.localLlmVikhr05Con,
-    },
     "vikhr-llama-1b": {
       name: t.localLlmVikhr1,
       desc: t.localLlmVikhr1Desc,
@@ -59,18 +47,6 @@
       desc: t.localLlmVikhr2Desc,
       pro: t.localLlmVikhr2Pro,
       con: t.localLlmVikhr2Con,
-    },
-    "qwen3-1.7b": {
-      name: t.localLlmQwen17,
-      desc: t.localLlmQwen17Desc,
-      pro: t.localLlmQwen17Pro,
-      con: t.localLlmQwen17Con,
-    },
-    "qwen3-4b": {
-      name: t.localLlmQwen4,
-      desc: t.localLlmQwen4Desc,
-      pro: t.localLlmQwen4Pro,
-      con: t.localLlmQwen4Con,
     },
   });
 

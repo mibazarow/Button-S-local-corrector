@@ -217,7 +217,13 @@ pub fn run() {
         .expect("error while building BUTTON-S")
         .run(|app, event| {
             if let tauri::RunEvent::Reopen { .. } = event {
-                tray::show_settings(app);
+                let selection_visible = app
+                    .get_webview_window("selection")
+                    .and_then(|window| window.is_visible().ok())
+                    .unwrap_or(false);
+                if !selection_visible {
+                    tray::show_settings(app);
+                }
             }
         });
 }
