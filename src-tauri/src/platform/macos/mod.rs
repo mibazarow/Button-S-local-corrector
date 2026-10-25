@@ -6,6 +6,8 @@ pub mod permissions;
 
 use std::ffi::c_void;
 use std::ptr;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use core_foundation::base::TCFType;
 use core_foundation::string::CFString;
@@ -363,6 +365,115 @@ pub fn ax_context(max_before: usize) -> Option<AxContext> {
     }
 }
 
+const BROWSER_HINTS: &[&str] = &[
+    "safari", "chrome", "firefox", "edgemac", "brave", "opera", "vivaldi", "browser", "yandex",
+    "comet", "atlas",
+];
+
+const ADDRESS_BAR_MARKERS: &[&str] = &[
+    "address",
+    "omnibox",
+    "urlbar",
+    "url bar",
+    "enter url",
+    "enter address",
+    "search or enter",
+    "адрес",
+    "урл",
+];
+
+static ADDRESS_BAR_CACHE: OnceLock<Mutex<Option<(String, Instant, bool)>>> = OnceLock::new();
+
+fn is_browser_bundle(bundle: &str) -> bool {
+    let lower = bundle.to_lowercase();
+    BROWSER_HINTS.iter().any(|hint| lower.contains(hint))
+}
+
+fn looks_like_address_bar(values: &[String]) -> bool {
+    values.iter().any(|value| {
+        let value = value.to_lowercase();
+        ADDRESS_BAR_MARKERS
+            .iter()
+            .any(|marker| value.contains(marker))
+    })
+}
+
+fn detect_address_bar() -> bool {
+    if !permissions::accessibility() {
+        return false;
+    }
+
+    unsafe {
+        let system = AXUIElementCreateSystemWide();
+        if system.is_null() {
+            return false;
+        }
+
+        let focused_attr = CFString::new("AXFocusedUIElement");
+        let mut focused_ptr: CFTypeRef = ptr::null();
+        let focused_err = AXUIElementCopyAttributeValue(
+            system,
+            focused_attr.as_concrete_TypeRef(),
+            &mut focused_ptr,
+        );
+        CFRelease(system as *const c_void);
+        if focused_err != 0 || focused_ptr.is_null() {
+            return false;
+        }
+        let focused = focused_ptr as AXUIElementRef;
+
+        let result = (|| {
+            let role = copy_string_attribute(focused, "AXRole").unwrap_or_default();
+            if !matches!(
+                role.as_str(),
+                "AXTextField" | "AXComboBox" | "AXSearchField"
+            ) {
+                return false;
+            }
+
+            let mut values = Vec::new();
+            for attribute in [
+                "AXIdentifier",
+                "AXDescription",
+                "AXTitle",
+                "AXPlaceholderValue",
+                "AXHelp",
+            ] {
+                if let Some(value) = copy_string_attribute(focused, attribute) {
+                    values.push(value.to_lowercase());
+                }
+            }
+            looks_like_address_bar(&values)
+        })();
+
+        CFRelease(focused as *const c_void);
+        result
+    }
+}
+
+pub fn browser_address_bar(bundle: &str) -> bool {
+    if !is_browser_bundle(bundle) {
+        return false;
+    }
+
+    let cache = ADDRESS_BAR_CACHE.get_or_init(|| Mutex::new(None));
+    let now = Instant::now();
+    if let Ok(guard) = cache.lock() {
+        if let Some((cached_bundle, at, result)) = guard.as_ref() {
+            if cached_bundle.as_str() == bundle && at.elapsed() < Duration::from_millis(500) {
+                return *result;
+            }
+        }
+    }
+
+    let result = detect_address_bar();
+
+    if let Ok(mut guard) = cache.lock() {
+        *guard = Some((bundle.to_string(), now, result));
+    }
+    result
+}
+
 pub fn switch_layout(language: &str) -> bool {
     unsafe {
         let cf = CFString::new(language);
@@ -388,4 +499,41 @@ pub fn language_for_text(text: &str) -> Option<&'static str> {
 
 pub fn open_permission_settings(kind: &str) -> Result<(), String> {
     permissions::open_settings(kind)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_address_bar_markers() {
+        assert!(looks_like_address_bar(&[
+            "Address and search bar".to_string()
+        ]));
+        assert!(looks_like_address_bar(&["omnibox".to_string()]));
+        assert!(looks_like_address_bar(&["urlbar-input".to_string()]));
+        assert!(looks_like_address_bar(&["Адресная строка".to_string()]));
+    }
+
+    #[test]
+    fn rejects_non_address_bar_values() {
+        assert!(!looks_like_address_bar(&["Search".to_string()]));
+        assert!(!looks_like_address_bar(&["Location".to_string()]));
+        assert!(!looks_like_address_bar(&["user@example.com".to_string()]));
+        assert!(!looks_like_address_bar(&[]));
+    }
+
+    #[test]
+    fn detects_browser_bundles() {
+        assert!(is_browser_bundle("com.apple.Safari"));
+        assert!(is_browser_bundle("com.google.Chrome"));
+        assert!(is_browser_bundle("org.mozilla.firefox"));
+        assert!(is_browser_bundle("com.microsoft.edgemac"));
+        assert!(is_browser_bundle("com.brave.Browser"));
+        assert!(is_browser_bundle("com.operasoftware.Opera"));
+        assert!(is_browser_bundle("com.vivaldi.Vivaldi"));
+        assert!(is_browser_bundle("com.yandex.Browser"));
+        assert!(!is_browser_bundle("com.microsoft.VSCode"));
+        assert!(!is_browser_bundle("com.apple.TextEdit"));
+    }
 }

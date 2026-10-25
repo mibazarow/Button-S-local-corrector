@@ -101,6 +101,9 @@ fn handle_char(
     if app_id.is_empty() {
         return;
     }
+    if platform::browser_address_bar(&app_id) {
+        return;
+    }
 
     let capitalization_enabled = {
         let config = state.config.read();
@@ -152,6 +155,9 @@ fn handle_boundary(state: &Arc<AppState>, word: &str, separator: char) -> Option
 
     let app_id = platform::frontmost_bundle_id().unwrap_or_default();
     if app_id.is_empty() {
+        return None;
+    }
+    if platform::browser_address_bar(&app_id) {
         return None;
     }
 
@@ -433,7 +439,7 @@ fn continue_list(state: &Arc<AppState>, previous_line: &str) -> Option<String> {
         let app_id = platform::frontmost_bundle_id().unwrap_or_default();
         (
             config.lists.enabled && config.app_feature_enabled(&app_id, Feature::Lists),
-            app_id.is_empty(),
+            app_id.is_empty() || platform::browser_address_bar(&app_id),
         )
     };
     if !enabled || excluded || previous_line.trim().is_empty() {

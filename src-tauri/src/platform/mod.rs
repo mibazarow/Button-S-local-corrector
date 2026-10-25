@@ -122,6 +122,16 @@ pub fn frontmost_app_info() -> Option<RunningAppInfo> {
 }
 
 #[cfg(target_os = "macos")]
+pub fn browser_address_bar(bundle: &str) -> bool {
+    macos::browser_address_bar(bundle)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn browser_address_bar(_bundle: &str) -> bool {
+    false
+}
+
+#[cfg(target_os = "macos")]
 pub fn mouse_button_down() -> bool {
     macos::mouse_button_down()
 }
