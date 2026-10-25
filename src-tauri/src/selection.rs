@@ -19,7 +19,10 @@ const EDGE_MARGIN: f64 = 8.0;
 const POLL_INTERVAL: Duration = Duration::from_millis(320);
 const MENU_WATCHDOG: Duration = Duration::from_secs(30);
 const TRAY_SHOW_DELAY: Duration = Duration::from_millis(180);
-const HIDE_DELAY: Duration = Duration::from_millis(650);
+const HIDE_DELAY: Duration = Duration::from_millis(150);
+const HIDE_WATCHER_STEP: Duration = Duration::from_millis(150);
+const HIDE_WATCHER_TICKS: u32 = 8;
+const SELECT_ALL_SETTLE: Duration = Duration::from_millis(80);
 const ACTIVATION_TIMEOUT: Duration = Duration::from_millis(1500);
 const ACTIVATION_SETTLE: Duration = Duration::from_millis(120);
 const CLIPBOARD_PROBE_TOTAL: Duration = Duration::from_millis(320);
@@ -56,6 +59,7 @@ pub fn start(app: AppHandle, state: Arc<AppState>) {
         loop {
             thread::sleep(POLL_INTERVAL);
             let tapped_drag_release = state.mouse_release_pending.swap(false, Ordering::Relaxed);
+            let select_all = state.select_all_pending.swap(false, Ordering::Relaxed);
 
             if state.selection_menu_open.load(Ordering::Relaxed) {
                 let stuck = match *state.selection_menu_since.lock() {
@@ -149,10 +153,13 @@ pub fn start(app: AppHandle, state: Arc<AppState>) {
                         last_reason = Some(reason_key);
                     }
 
-                    if released
+                    if (released || select_all)
                         && fallback.is_none()
                         && fallback_target_editable(&failure, &frontmost.bundle_id)
                     {
+                        if select_all {
+                            thread::sleep(SELECT_ALL_SETTLE);
+                        }
                         if let Some(text) = probe_selection_via_clipboard() {
                             if state.activity.load(Ordering::Relaxed) == activity {
                                 fallback = Some(FallbackSelection {
@@ -297,6 +304,30 @@ fn probe_selection_via_clipboard() -> Option<String> {
     Some(text)
 }
 
+fn point_inside_menu(app: &AppHandle) -> bool {
+    let Some(window) = app.get_webview_window("selection") else {
+        return false;
+    };
+    let Ok(position) = window.outer_position() else {
+        return false;
+    };
+    let Ok(size) = window.outer_size() else {
+        return false;
+    };
+    let Ok(scale) = window.scale_factor() else {
+        return false;
+    };
+    let Some((x, y)) = platform::mouse_location() else {
+        return false;
+    };
+    let left = position.x as f64 / scale;
+    let top = position.y as f64 / scale;
+    x >= left
+        && x <= left + size.width as f64 / scale
+        && y >= top
+        && y <= top + size.height as f64 / scale
+}
+
 fn show_menu(app: &AppHandle, state: &AppState, rect: tauri::Rect, generation: u64) {
     if state.selection_hover_gen.load(Ordering::SeqCst) != generation
         || !state.selection_tray_hovered.load(Ordering::SeqCst)
@@ -417,9 +448,23 @@ fn schedule_hide(app: &AppHandle, state: &Arc<AppState>, generation: u64) {
     let state = state.clone();
     thread::spawn(move || {
         thread::sleep(HIDE_DELAY);
+        for _ in 0..HIDE_WATCHER_TICKS {
+            if state.selection_hover_gen.load(Ordering::SeqCst) != generation
+                || state.selection_tray_hovered.load(Ordering::SeqCst)
+                || state.selection_pointer_inside.load(Ordering::SeqCst)
+            {
+                return;
+            }
+            if point_inside_menu(&app) {
+                state.selection_pointer_inside.store(true, Ordering::SeqCst);
+                return;
+            }
+            thread::sleep(HIDE_WATCHER_STEP);
+        }
         if state.selection_hover_gen.load(Ordering::SeqCst) != generation
             || state.selection_tray_hovered.load(Ordering::SeqCst)
             || state.selection_pointer_inside.load(Ordering::SeqCst)
+            || point_inside_menu(&app)
         {
             return;
         }

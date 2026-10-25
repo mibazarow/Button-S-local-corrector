@@ -20,6 +20,7 @@
   let busy = $state(false);
   let custom = $state("");
   let input = $state<HTMLInputElement | null>(null);
+  let inputFocused = $state(false);
 
   async function hide() {
     busy = false;
@@ -60,6 +61,7 @@
     const stop = listen("selection-show", () => {
       busy = false;
       custom = "";
+      inputFocused = false;
     });
 
     const onKey = (event: KeyboardEvent) => {
@@ -80,7 +82,9 @@
   aria-label="BUTTON-S"
   tabindex="-1"
   onmouseenter={() => pointer(true)}
-  onmouseleave={() => pointer(false)}
+  onmouseleave={() => {
+    if (!inputFocused) pointer(false);
+  }}
 >
   <div class="menu" role="group" aria-label="BUTTON-S">
     <div class="actions">
@@ -97,9 +101,16 @@
         placeholder={t.selectionPromptPlaceholder}
         spellcheck="false"
         onpointerdown={() => {
+          inputFocused = true;
           void focusInput();
         }}
-        onfocus={focusInput}
+        onfocus={() => {
+          inputFocused = true;
+          void focusInput();
+        }}
+        onblur={() => {
+          inputFocused = false;
+        }}
         onkeydown={(event) => {
           if (event.key === "Enter") {
             if (event.isComposing) return;
@@ -141,10 +152,9 @@
     box-sizing: border-box;
     padding: 8px;
     border-radius: 14px;
-    border: 1px solid rgb(255 255 255 / 0.12);
-    background: rgb(28 29 34 / 0.96);
+    border: 1px solid #3a3c44;
+    background: #1c1d22;
     box-shadow: 0 18px 50px rgb(0 0 0 / 0.45);
-    backdrop-filter: blur(20px);
     color: #f5f5f7;
   }
 

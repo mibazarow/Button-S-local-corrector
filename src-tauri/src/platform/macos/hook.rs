@@ -136,6 +136,7 @@ extern "C" fn callback(
         }
 
         let flags = CGEventGetFlags(event);
+        let key_code = CGEventGetIntegerValueField(event, KCG_KEYBOARD_EVENT_KEYCODE) as u16;
 
         if flags
             & (KCG_EVENT_FLAG_MASK_COMMAND
@@ -143,11 +144,18 @@ extern "C" fn callback(
                 | KCG_EVENT_FLAG_MASK_ALTERNATE)
             != 0
         {
+            if flags & KCG_EVENT_FLAG_MASK_COMMAND != 0
+                && flags & (KCG_EVENT_FLAG_MASK_CONTROL | KCG_EVENT_FLAG_MASK_ALTERNATE) == 0
+                && key_code == 0
+            {
+                ctx.state
+                    .select_all_pending
+                    .store(true, Ordering::Relaxed);
+            }
             ctx.push_shortcut();
             return event;
         }
 
-        let key_code = CGEventGetIntegerValueField(event, KCG_KEYBOARD_EVENT_KEYCODE) as u16;
         match key_code {
             51 => {
                 ctx.push(KeyEvent::Backspace);
