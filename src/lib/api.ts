@@ -319,6 +319,11 @@ export const api = {
   voiceStop: () => invoke<void>("voice_stop"),
   voiceCancel: () => invoke<void>("voice_cancel"),
   copyText: (text: string) => invoke<void>("copy_to_clipboard", { text }),
+  selectionAction: (action: string, prompt: string) =>
+    invoke<void>("selection_action", { action, prompt }),
+  selectionExpand: () => invoke<void>("selection_expand"),
+  selectionFocus: () => invoke<void>("selection_focus"),
+  selectionHide: () => invoke<void>("selection_hide"),
   diagnostics: () => invoke<string>("diagnostics"),
   exportDiagnostics: (path: string) =>
     invoke<string>("export_diagnostics", { path }),

@@ -224,7 +224,7 @@ pub fn show_result(app: &AppHandle, text: &str) {
     }
 }
 
-fn show_action_error(app: &AppHandle, state: &AppState, error: &str) {
+pub(crate) fn show_action_error(app: &AppHandle, state: &AppState, error: &str) {
     state.diag(&format!("ai error: {error}"));
     state.emit_event("toast", json!({ "kind": "error", "text": error }));
     if let Some(window) = app.get_webview_window("settings") {

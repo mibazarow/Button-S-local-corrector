@@ -79,6 +79,17 @@ const ru = {
   footer: "BUTTON-S работает в строке меню. Настройки можно открыть в любой момент.",
 
   // Голос
+  selectionActionFix: "Исправить грамматику",
+  selectionActionFormal: "Сделать официальным",
+  selectionActionSimple: "Сделать проще",
+  selectionActionShort: "Сократить",
+  selectionActionSummary: "Суммировать",
+  selectionActionRewrite: "Переписать",
+  selectionActionBullets: "Сделать списком",
+  selectionActionToEn: "RU → EN",
+  selectionActionToRu: "EN → RU",
+  selectionPromptPlaceholder: "Что сделать с текстом?",
+  selectionEnterHint: "Enter — выполнить",
   voiceIntroTitle: "Как работает диктовка",
   voiceIntroText:
     "Нажмите {hotkey} в любом приложении и говорите — текст появится там, где стоит курсор. Сначала скачайте модель: она работает на этом Mac, аудио не уходит в интернет.",
@@ -490,6 +501,17 @@ const en: Strings = {
   footer: "BUTTON-S lives in the menu bar. Open settings at any time.",
 
   // Voice
+  selectionActionFix: "Fix grammar",
+  selectionActionFormal: "Make formal",
+  selectionActionSimple: "Make simpler",
+  selectionActionShort: "Shorten",
+  selectionActionSummary: "Summarize",
+  selectionActionRewrite: "Rewrite",
+  selectionActionBullets: "Make a list",
+  selectionActionToEn: "RU → EN",
+  selectionActionToRu: "EN → RU",
+  selectionPromptPlaceholder: "What should I do with the text?",
+  selectionEnterHint: "Enter to run",
   voiceIntroTitle: "How dictation works",
   voiceIntroText:
     "Press {hotkey} in any app and speak — the text appears at the cursor. First download a model: it runs on this Mac and audio never leaves the computer.",

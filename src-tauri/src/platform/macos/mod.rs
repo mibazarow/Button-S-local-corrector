@@ -10,12 +10,202 @@ use std::ptr;
 use core_foundation::base::TCFType;
 use core_foundation::string::CFString;
 use core_foundation_sys::base::{CFRelease, CFTypeRef};
+use core_foundation_sys::number::{CFBooleanGetTypeID, CFBooleanGetValue, CFBooleanRef};
 
-use crate::platform::AxContext;
+use crate::platform::{AxContext, SelectionInfo};
 use ffi::*;
 
 pub fn frontmost_bundle_id() -> Option<String> {
     apps::frontmost_bundle_id()
+}
+
+pub fn frontmost_app_info() -> Option<crate::platform::RunningAppInfo> {
+    apps::frontmost_app_info()
+}
+
+pub fn mouse_button_down() -> bool {
+    unsafe {
+        CGEventSourceButtonState(
+            KCG_EVENT_SOURCE_STATE_COMBINED_SESSION_STATE,
+            KCG_MOUSE_BUTTON_LEFT,
+        )
+    }
+}
+
+unsafe fn copy_string_attribute(element: AXUIElementRef, name: &str) -> Option<String> {
+    let attribute = CFString::new(name);
+    let mut value: CFTypeRef = ptr::null();
+    let error =
+        AXUIElementCopyAttributeValue(element, attribute.as_concrete_TypeRef(), &mut value);
+    if error != 0 || value.is_null() {
+        return None;
+    }
+    if CFGetTypeID(value) != CFStringGetTypeID() {
+        CFRelease(value);
+        return None;
+    }
+    Some(CFString::wrap_under_create_rule(value as _).to_string())
+}
+
+unsafe fn copy_bool_attribute(element: AXUIElementRef, name: &str) -> Option<bool> {
+    let attribute = CFString::new(name);
+    let mut value: CFTypeRef = ptr::null();
+    let error =
+        AXUIElementCopyAttributeValue(element, attribute.as_concrete_TypeRef(), &mut value);
+    if error != 0 || value.is_null() {
+        return None;
+    }
+    if CFGetTypeID(value) != CFBooleanGetTypeID() {
+        CFRelease(value);
+        return None;
+    }
+    let result = CFBooleanGetValue(value as CFBooleanRef);
+    CFRelease(value);
+    Some(result)
+}
+
+unsafe fn copy_range_attribute(element: AXUIElementRef, name: &str) -> Option<CFRange> {
+    let attribute = CFString::new(name);
+    let mut value: CFTypeRef = ptr::null();
+    let error =
+        AXUIElementCopyAttributeValue(element, attribute.as_concrete_TypeRef(), &mut value);
+    if error != 0 || value.is_null() {
+        return None;
+    }
+    let mut range = CFRange::default();
+    let ok = AXValueGetValue(
+        value,
+        KAX_VALUE_CF_RANGE_TYPE,
+        &mut range as *mut _ as *mut c_void,
+    );
+    CFRelease(value);
+    if ok {
+        Some(range)
+    } else {
+        None
+    }
+}
+
+unsafe fn bounds_for_range(element: AXUIElementRef, range: CFRange) -> Option<CGRect> {
+    let attribute = CFString::new("AXBoundsForRange");
+    let parameter = AXValueCreate(
+        KAX_VALUE_CF_RANGE_TYPE,
+        &range as *const _ as *const c_void,
+    );
+    if parameter.is_null() {
+        return None;
+    }
+
+    let mut value: CFTypeRef = ptr::null();
+    let error = AXUIElementCopyParameterizedAttributeValue(
+        element,
+        attribute.as_concrete_TypeRef(),
+        parameter,
+        &mut value,
+    );
+    CFRelease(parameter);
+    if error != 0 || value.is_null() {
+        return None;
+    }
+
+    let mut rect = CGRect::default();
+    let ok = AXValueGetValue(
+        value,
+        KAX_VALUE_CF_RECT_TYPE,
+        &mut rect as *mut _ as *mut c_void,
+    );
+    CFRelease(value);
+    if ok {
+        Some(rect)
+    } else {
+        None
+    }
+}
+
+fn valid_bounds(rect: CGRect) -> Option<(f64, f64)> {
+    let end = (
+        rect.origin.x + rect.size.width,
+        rect.origin.y + rect.size.height,
+    );
+    if end.0 > 1.0 || end.1 > 1.0 {
+        Some(end)
+    } else {
+        None
+    }
+}
+
+pub fn selection_info() -> Option<SelectionInfo> {
+    if !permissions::accessibility() {
+        return None;
+    }
+
+    unsafe {
+        let system = AXUIElementCreateSystemWide();
+        if system.is_null() {
+            return None;
+        }
+
+        let focused_attr = CFString::new("AXFocusedUIElement");
+        let mut focused_ptr: CFTypeRef = ptr::null();
+        let focused_err = AXUIElementCopyAttributeValue(
+            system,
+            focused_attr.as_concrete_TypeRef(),
+            &mut focused_ptr,
+        );
+        CFRelease(system as *const c_void);
+        if focused_err != 0 || focused_ptr.is_null() {
+            return None;
+        }
+        let focused = focused_ptr as AXUIElementRef;
+
+        let result = (|| {
+            let role = copy_string_attribute(focused, "AXRole");
+            if let Some(role) = role.as_deref() {
+                if matches!(
+                    role,
+                    "AXStaticText" | "AXHeading" | "AXLink" | "AXImage" | "AXButton"
+                ) {
+                    return None;
+                }
+                if role == "AXWebArea" && copy_bool_attribute(focused, "AXEditable") != Some(true) {
+                    return None;
+                }
+            }
+            if copy_bool_attribute(focused, "AXEditable") == Some(false) {
+                return None;
+            }
+
+            let text = copy_string_attribute(focused, "AXSelectedText")?;
+            if text.trim().is_empty() {
+                return None;
+            }
+            let range = copy_range_attribute(focused, "AXSelectedTextRange")?;
+            if range.location < 0 || range.length < 0 {
+                return None;
+            }
+
+            let caret = CFRange {
+                location: range.location + range.length,
+                length: 0,
+            };
+            let end = bounds_for_range(focused, caret)
+                .and_then(valid_bounds)
+                .or_else(|| bounds_for_range(focused, range).and_then(valid_bounds))?;
+
+            Some(SelectionInfo { text, end })
+        })();
+
+        CFRelease(focused as *const c_void);
+        result
+    }
+}
+
+pub fn activate_app(bundle_id: &str) -> bool {
+    std::process::Command::new("open")
+        .args(["-b", bundle_id])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
 }
 
 pub fn secure_input() -> bool {

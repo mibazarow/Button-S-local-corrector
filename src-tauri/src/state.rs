@@ -22,6 +22,12 @@ pub enum ChangeKind {
     Manual,
 }
 
+pub struct SelectionCapture {
+    pub text: String,
+    pub bundle_id: String,
+    pub at: Instant,
+}
+
 pub struct LastChange {
     pub original: String,
     pub replacement: String,
@@ -46,6 +52,12 @@ pub struct AppState {
     pub activity: AtomicU64,
     pub last_error: RwLock<Option<String>>,
     pub last_change: Mutex<Option<LastChange>>,
+    pub selection: Mutex<Option<SelectionCapture>>,
+    pub selection_visible: AtomicBool,
+    pub selection_menu_open: AtomicBool,
+    pub selection_menu_since: Mutex<Option<Instant>>,
+    pub selection_dismissed: Mutex<Option<String>>,
+    pub selection_suppress_until: Mutex<Option<Instant>>,
     app: RwLock<Option<AppHandle>>,
 }
 
@@ -105,6 +117,12 @@ impl AppState {
             activity: AtomicU64::new(0),
             last_error: RwLock::new(None),
             last_change: Mutex::new(None),
+            selection: Mutex::new(None),
+            selection_visible: AtomicBool::new(false),
+            selection_menu_open: AtomicBool::new(false),
+            selection_menu_since: Mutex::new(None),
+            selection_dismissed: Mutex::new(None),
+            selection_suppress_until: Mutex::new(None),
             app: RwLock::new(None),
         }
     }

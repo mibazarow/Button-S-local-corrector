@@ -966,6 +966,31 @@ pub fn voice_cancel(app: AppHandle, state: State<'_, Arc<AppState>>) {
 
 
 #[tauri::command]
+pub async fn selection_action(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    action: String,
+    prompt: String,
+) -> Result<(), String> {
+    crate::selection::run_action(&app, &state, &action, &prompt).await
+}
+
+#[tauri::command]
+pub fn selection_expand(app: AppHandle, state: State<'_, Arc<AppState>>) {
+    crate::selection::expand(&app, &state);
+}
+
+#[tauri::command]
+pub fn selection_focus(app: AppHandle) {
+    crate::selection::focus(&app);
+}
+
+#[tauri::command]
+pub fn selection_hide(app: AppHandle, state: State<'_, Arc<AppState>>) {
+    crate::selection::dismiss(&app, &state);
+}
+
+#[tauri::command]
 pub fn copy_to_clipboard(text: String) -> Result<(), String> {
     let mut clipboard = arboard::Clipboard::new().map_err(|error| error.to_string())?;
     clipboard

@@ -7,6 +7,7 @@ mod hotkeys;
 mod llm;
 mod llm_local;
 mod platform;
+mod selection;
 mod state;
 mod tray;
 mod user_dict;
@@ -47,6 +48,25 @@ fn create_aux_windows(app: &tauri::AppHandle) -> tauri::Result<()> {
         .focused(false)
         .visible(false)
         .build()?;
+
+    #[cfg(target_os = "macos")]
+    WebviewWindowBuilder::new(
+        app,
+        "selection",
+        WebviewUrl::App("index.html#selection".into()),
+    )
+    .title("BUTTON-S")
+    .inner_size(40.0, 40.0)
+    .decorations(false)
+    .transparent(true)
+    .shadow(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .focusable(false)
+    .focused(false)
+    .resizable(false)
+    .visible(false)
+    .build()?;
 
     Ok(())
 }
@@ -132,6 +152,10 @@ pub fn run() {
             commands::voice_stop,
             commands::voice_cancel,
             commands::copy_to_clipboard,
+            commands::selection_action,
+            commands::selection_expand,
+            commands::selection_focus,
+            commands::selection_hide,
             commands::add_selection_word,
             commands::diagnostics,
             commands::export_diagnostics,
@@ -173,6 +197,7 @@ pub fn run() {
             tray::create(&handle, &state)?;
             create_aux_windows(&handle)?;
             engine::start(state.clone());
+            selection::start(handle.clone(), state.clone());
             platform::request_permissions();
             hotkeys::register(&handle, &state);
 

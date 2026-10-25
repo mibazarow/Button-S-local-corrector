@@ -22,10 +22,23 @@ pub struct RunningApp {
     pub name: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunningAppInfo {
+    pub pid: i32,
+    pub bundle_id: String,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct AxContext {
     pub before: String,
     pub selected: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SelectionInfo {
+    pub text: String,
+    pub end: (f64, f64),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,8 +70,48 @@ pub fn ax_context(max_before: usize) -> Option<AxContext> {
 }
 
 #[cfg(target_os = "macos")]
+pub fn selection_info() -> Option<SelectionInfo> {
+    macos::selection_info()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn selection_info() -> Option<SelectionInfo> {
+    None
+}
+
+#[cfg(target_os = "macos")]
 pub fn frontmost_bundle_id() -> Option<String> {
     macos::frontmost_bundle_id()
+}
+
+#[cfg(target_os = "macos")]
+pub fn frontmost_app_info() -> Option<RunningAppInfo> {
+    macos::frontmost_app_info()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn frontmost_app_info() -> Option<RunningAppInfo> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+pub fn mouse_button_down() -> bool {
+    macos::mouse_button_down()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn mouse_button_down() -> bool {
+    false
+}
+
+#[cfg(target_os = "macos")]
+pub fn activate_app(bundle_id: &str) -> bool {
+    macos::activate_app(bundle_id)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn activate_app(_bundle_id: &str) -> bool {
+    false
 }
 
 #[cfg(target_os = "macos")]

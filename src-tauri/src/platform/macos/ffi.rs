@@ -40,7 +40,11 @@ pub const KCG_EVENT_FLAG_MASK_CONTROL: u64 = 1 << 18;
 pub const KCG_EVENT_FLAG_MASK_ALTERNATE: u64 = 1 << 19;
 pub const KCG_EVENT_FLAG_MASK_COMMAND: u64 = 1 << 20;
 
+pub const KAX_VALUE_CF_RECT_TYPE: u32 = 3;
 pub const KAX_VALUE_CF_RANGE_TYPE: u32 = 4;
+
+pub const KCG_EVENT_SOURCE_STATE_COMBINED_SESSION_STATE: i32 = 0;
+pub const KCG_MOUSE_BUTTON_LEFT: u32 = 0;
 
 pub const MAGIC_MARKER: i64 = 0x4255_5454;
 
@@ -49,6 +53,27 @@ pub const MAGIC_MARKER: i64 = 0x4255_5454;
 pub struct CFRange {
     pub location: c_long,
     pub length: c_long,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CGPoint {
+    pub x: f64,
+    pub y: f64,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CGSize {
+    pub width: f64,
+    pub height: f64,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CGRect {
+    pub origin: CGPoint,
+    pub size: CGSize,
 }
 
 #[link(name = "CoreGraphics", kind = "framework")]
@@ -79,6 +104,7 @@ extern "C" {
     pub fn CGEventSetIntegerValueField(event: CGEventRef, field: u32, value: i64);
     pub fn CGEventSetFlags(event: CGEventRef, flags: u64);
     pub fn CGEventPost(tap: u32, event: CGEventRef);
+    pub fn CGEventSourceButtonState(source_state: i32, button: u32) -> bool;
     pub fn CGPreflightListenEventAccess() -> bool;
     pub fn CGRequestListenEventAccess() -> bool;
 }
@@ -108,6 +134,13 @@ extern "C" {
         attribute: CFStringRef,
         value: *mut CFTypeRef,
     ) -> i32;
+    pub fn AXUIElementCopyParameterizedAttributeValue(
+        element: AXUIElementRef,
+        parameterized_attribute: CFStringRef,
+        parameter: CFTypeRef,
+        value: *mut CFTypeRef,
+    ) -> i32;
+    pub fn AXValueCreate(value_type: u32, value: *const c_void) -> CFTypeRef;
     pub fn AXValueGetValue(value: CFTypeRef, value_type: u32, out: *mut c_void) -> bool;
 }
 

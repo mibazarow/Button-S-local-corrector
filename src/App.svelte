@@ -15,6 +15,7 @@
   import Icon from "./lib/Icon.svelte";
   import Hud from "./components/Hud.svelte";
   import ResultView from "./components/ResultView.svelte";
+  import SelectionOverlay from "./components/SelectionOverlay.svelte";
   import VoiceTab from "./components/VoiceTab.svelte";
   import DictionaryTab from "./components/DictionaryTab.svelte";
   import AppsTab from "./components/AppsTab.svelte";
@@ -149,7 +150,7 @@
   }
 
   onMount(() => {
-    if (view === "hud") {
+    if (view === "hud" || view === "selection") {
       document.body.style.background = "transparent";
     }
     if (view !== "main") return;
@@ -182,6 +183,8 @@
 
 {#if view === "hud"}
   <Hud />
+{:else if view === "selection"}
+  <SelectionOverlay />
 {:else if view === "result"}
   <ResultView />
 {:else}
