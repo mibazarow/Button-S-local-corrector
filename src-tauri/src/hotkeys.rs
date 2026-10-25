@@ -6,7 +6,7 @@ use serde_json::json;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 
-use crate::actions::{self, CaseMode};
+use crate::actions;
 use crate::config::is_modifier_only_combo;
 use crate::engine;
 use crate::state::AppState;
@@ -137,34 +137,6 @@ fn run_action(app: &AppHandle, state: &Arc<AppState>, action: &str, pressed: boo
         "translateEnRu" => {
             if pressed {
                 actions::spawn_translate(app.clone(), Arc::clone(state), "ru".into());
-            }
-        }
-        "caseUpper" => {
-            if pressed {
-                if let Err(error) = actions::change_case(state, CaseMode::Upper) {
-                    toast(state, &error);
-                }
-            }
-        }
-        "caseLower" => {
-            if pressed {
-                if let Err(error) = actions::change_case(state, CaseMode::Lower) {
-                    toast(state, &error);
-                }
-            }
-        }
-        "caseTitle" => {
-            if pressed {
-                if let Err(error) = actions::change_case(state, CaseMode::Title) {
-                    toast(state, &error);
-                }
-            }
-        }
-        "caseInvert" => {
-            if pressed {
-                if let Err(error) = actions::change_case(state, CaseMode::Invert) {
-                    toast(state, &error);
-                }
             }
         }
         "pauseAll" => {

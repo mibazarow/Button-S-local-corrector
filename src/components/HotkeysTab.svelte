@@ -18,10 +18,6 @@
     { key: "dictate", label: t.actionDictate },
     { key: "translateRuEn", label: t.actionTranslateRuEn },
     { key: "translateEnRu", label: t.actionTranslateEnRu },
-    { key: "caseUpper", label: t.actionCaseUpper },
-    { key: "caseLower", label: t.actionCaseLower },
-    { key: "caseTitle", label: t.actionCaseTitle },
-    { key: "caseInvert", label: t.actionCaseInvert },
     { key: "llmFix", label: t.actionLlmFix },
     { key: "pauseAll", label: t.actionPauseAll },
   ]);
@@ -33,10 +29,6 @@
     dictate: "ShiftRight",
     translateRuEn: "Command+Alt+KeyT",
     translateEnRu: "Command+Alt+Shift+KeyT",
-    caseUpper: "Command+Alt+KeyU",
-    caseLower: "Command+Alt+Shift+KeyU",
-    caseTitle: "Command+Alt+KeyI",
-    caseInvert: "Command+Alt+Shift+KeyI",
     pauseAll: "Command+Alt+KeyP",
     llmFix: "Command+Alt+KeyF",
   };

@@ -116,98 +116,6 @@ pub fn convert_selection(state: &AppState) -> Result<(), String> {
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum CaseMode {
-    Upper,
-    Lower,
-    Title,
-    Invert,
-}
-
-pub fn transform_case(text: &str, mode: CaseMode) -> String {
-    match mode {
-        CaseMode::Upper => text.to_uppercase(),
-        CaseMode::Lower => text.to_lowercase(),
-        CaseMode::Title => text
-            .split_inclusive(|ch: char| ch.is_whitespace())
-            .map(|chunk| {
-                let mut chars = chunk.chars();
-                match chars.next() {
-                    Some(first) => {
-                        let mut result: String = first.to_uppercase().collect();
-                        result.push_str(&chars.as_str().to_lowercase());
-                        result
-                    }
-                    None => String::new(),
-                }
-            })
-            .collect(),
-        CaseMode::Invert => text
-            .chars()
-            .map(|ch| {
-                if ch.is_uppercase() {
-                    ch.to_lowercase().collect::<String>()
-                } else if ch.is_lowercase() {
-                    ch.to_uppercase().collect::<String>()
-                } else {
-                    ch.to_string()
-                }
-            })
-            .collect(),
-    }
-}
-
-pub fn change_case(state: &AppState, mode: CaseMode) -> Result<(), String> {
-    let Some(context) = selection_context() else {
-        return Err("Не удалось прочитать выделение".into());
-    };
-
-    if let Some(selected) = context.selected {
-        let replacement = transform_case(&selected, mode);
-        if replacement == selected {
-            return Ok(());
-        }
-        platform::insert_text(&replacement)?;
-        state.remember_change(
-            ChangeKind::Case,
-            selected.clone(),
-            replacement.clone(),
-            selected.clone(),
-            replacement.clone(),
-        );
-        state.record_history(
-            "case",
-            Some(&context.app_id),
-            Some(&selected),
-            Some(&replacement),
-            None,
-        );
-        return Ok(());
-    }
-
-    let Some((word, suffix)) = tail_word(&context.before) else {
-        return Ok(());
-    };
-    let replacement = transform_case(&word, mode);
-    let insertion = format!("{replacement}{suffix}");
-    platform::replace_text(word.chars().count() + suffix.chars().count(), &insertion)?;
-    state.remember_change(
-        ChangeKind::Case,
-        format!("{word}{suffix}"),
-        insertion,
-        word.clone(),
-        replacement.clone(),
-    );
-    state.record_history(
-        "case",
-        Some(&context.app_id),
-        Some(&word),
-        Some(&replacement),
-        None,
-    );
-    Ok(())
-}
-
 pub fn target_text() -> Option<(String, bool)> {
     if let Some(context) = platform::ax_context(2048) {
         if let Some(selected) = context.selected.filter(|text| !text.trim().is_empty()) {
@@ -254,7 +162,22 @@ pub fn target_word() -> Option<String> {
 }
 
 pub fn insert_result(state: &AppState, text: &str) -> Result<(), String> {
-    platform::insert_text(text)?;
+    if platform::secure_input() {
+        return Err("Защищённое поле: вставка отключена".into());
+    }
+
+    let mut clipboard = arboard::Clipboard::new().map_err(|error| error.to_string())?;
+    let previous = clipboard.get_text().ok();
+    clipboard
+        .set_text(text.to_string())
+        .map_err(|error| error.to_string())?;
+    platform::paste()?;
+    thread::sleep(Duration::from_millis(250));
+    if let Some(previous) = previous {
+        let _ = clipboard.set_text(previous);
+    }
+
+    state.diag(&format!("ai insert ok: {} chars", text.chars().count()));
     state.record_history("llm", None, None, Some(text), None);
     Ok(())
 }
@@ -383,8 +306,13 @@ pub async fn run_prompt(
     if result.is_empty() {
         return Err("Провайдер вернул пустой ответ".into());
     }
+    state.diag(&format!(
+        "ai prompt done: {} chars",
+        result.chars().count()
+    ));
 
     deliver_output(app, state, &prompt.output, &result)?;
+    state.diag("ai prompt delivered");
     state.record_history(
         "llm",
         Some(&app_id),
@@ -458,7 +386,12 @@ pub async fn translate(
     );
 
     let result = result?;
+    state.diag(&format!(
+        "ai translate done: {} chars",
+        result.chars().count()
+    ));
     deliver_output(app, state, &output, &result)?;
+    state.diag("ai translate delivered");
     state.record_history(
         "llm",
         platform::frontmost_bundle_id().as_deref(),
@@ -469,15 +402,4 @@ pub async fn translate(
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
 
-    #[test]
-    fn transforms_case() {
-        assert_eq!(transform_case("привет мир", CaseMode::Upper), "ПРИВЕТ МИР");
-        assert_eq!(transform_case("ПРИВЕТ МИР", CaseMode::Lower), "привет мир");
-        assert_eq!(transform_case("привет мир", CaseMode::Title), "Привет Мир");
-        assert_eq!(transform_case("ПрИвЕт", CaseMode::Invert), "пРиВеТ");
-    }
-}

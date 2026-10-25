@@ -18,9 +18,7 @@ use crate::user_dict::UserDictionaryFile;
 pub enum ChangeKind {
     Layout,
     Typo,
-    Rule,
     Shift,
-    Case,
     Manual,
 }
 

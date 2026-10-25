@@ -17,7 +17,6 @@
   import ResultView from "./components/ResultView.svelte";
   import VoiceTab from "./components/VoiceTab.svelte";
   import DictionaryTab from "./components/DictionaryTab.svelte";
-  import RulesTab from "./components/RulesTab.svelte";
   import AppsTab from "./components/AppsTab.svelte";
   import AiTab from "./components/AiTab.svelte";
   import HotkeysTab from "./components/HotkeysTab.svelte";
@@ -66,7 +65,6 @@
     { id: "main", icon: "main", label: t.tabMain },
     { id: "voice", icon: "voice", label: t.tabVoice },
     { id: "dictionary", icon: "dictionary", label: t.tabDictionary },
-    { id: "rules", icon: "rules", label: t.tabRules },
     { id: "apps", icon: "apps", label: t.tabApps },
     { id: "ai", icon: "ai", label: t.tabAi },
     { id: "hotkeys", icon: "hotkeys", label: t.tabHotkeys },
@@ -399,8 +397,6 @@
           <VoiceTab bind:config {refresh} {lang} />
         {:else if tab === "dictionary"}
           <DictionaryTab {lang} />
-        {:else if tab === "rules"}
-          <RulesTab bind:config {refresh} {lang} />
       {:else if tab === "apps"}
         <AppsTab bind:config refresh={refresh} lang={lang} />
       {:else if tab === "ai"}

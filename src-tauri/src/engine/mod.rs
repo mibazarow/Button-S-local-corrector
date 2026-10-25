@@ -96,35 +96,11 @@ fn handle_char(
         return;
     }
 
-    let (replacements_enabled, capitalization_enabled) = {
+    let capitalization_enabled = {
         let config = state.config.read();
-        (
-            config.replacements.clone(),
-            config.app_feature_enabled(&app_id, Feature::Capitalization)
-                && config.capitalization.enabled,
-        )
+        config.app_feature_enabled(&app_id, Feature::Capitalization)
+            && config.capitalization.enabled
     };
-
-    if !platform::secure_input() && !replacements_enabled.is_empty() {
-        if let Some((count, replacement)) = rules::immediate(buffer, &replacements_enabled, &app_id) {
-            if state.activity.load(std::sync::atomic::Ordering::Relaxed) != expected {
-                return;
-            }
-            if platform::replace_typed(count, &replacement, None).is_ok() {
-                truncate_chars(buffer, count);
-                buffer.push_str(&replacement);
-                state.record_history(
-                    "replace",
-                    Some(&app_id),
-                    None,
-                    None,
-                    Some(&format!("immediate:{replacement}")),
-                );
-                *sentence_start = false;
-                return;
-            }
-        }
-    }
 
     if *sentence_start && capitalization_enabled && ch.is_lowercase() && ch.is_alphabetic() {
         let upper: String = ch.to_uppercase().collect();
@@ -176,7 +152,6 @@ fn handle_boundary(state: &Arc<AppState>, word: &str, separator: char) -> Option
     let (
         layout_enabled,
         auto_switch,
-        replacements,
         typos_enabled,
         typo_mode,
         typo_distance,
@@ -187,7 +162,6 @@ fn handle_boundary(state: &Arc<AppState>, word: &str, separator: char) -> Option
         (
             config.layout.enabled && config.app_feature_enabled(&app_id, Feature::Layout),
             config.layout.auto_switch_layout,
-            config.replacements.clone(),
             config.typos.enabled && config.app_feature_enabled(&app_id, Feature::Typos),
             config.typos.mode.clone(),
             config.typos.max_distance,
@@ -195,24 +169,6 @@ fn handle_boundary(state: &Arc<AppState>, word: &str, separator: char) -> Option
             state.user_dict.read().contains(word),
         )
     };
-
-    if config_feature(state, &app_id, Feature::Replacements) {
-        if let Some(replaced) = rules::apply_boundary(word, separator, &replacements, &app_id) {
-            if apply_change(
-                state,
-                &app_id,
-                expected,
-                ChangeKind::Rule,
-                "replace",
-                word,
-                &replaced,
-                separator,
-                false,
-            ) {
-                return Some(replaced);
-            }
-        }
-    }
 
     if user_protected {
         return None;
@@ -336,11 +292,6 @@ fn handle_boundary(state: &Arc<AppState>, word: &str, separator: char) -> Option
     }
 
     None
-}
-
-fn config_feature(state: &AppState, app_id: &str, feature: Feature) -> bool {
-    let config = state.config.read();
-    config.app_feature_enabled(app_id, feature)
 }
 
 #[allow(clippy::too_many_arguments)]

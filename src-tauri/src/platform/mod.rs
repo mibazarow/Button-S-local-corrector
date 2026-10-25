@@ -96,6 +96,16 @@ pub fn copy_selection() -> Result<(), String> {
     Err("not supported".into())
 }
 
+#[cfg(target_os = "macos")]
+pub fn paste() -> Result<(), String> {
+    macos::inject::paste()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn paste() -> Result<(), String> {
+    Err("not supported".into())
+}
+
 #[cfg(not(target_os = "macos"))]
 pub fn insert_text(_text: &str) -> Result<(), String> {
     Err("not supported".into())

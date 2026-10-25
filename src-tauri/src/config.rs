@@ -439,10 +439,6 @@ pub fn default_hotkeys() -> BTreeMap<String, String> {
         ("dictate", "ShiftRight"),
         ("translateRuEn", "Command+Alt+KeyT"),
         ("translateEnRu", "Command+Alt+Shift+KeyT"),
-        ("caseUpper", "Command+Alt+KeyU"),
-        ("caseLower", "Command+Alt+Shift+KeyU"),
-        ("caseTitle", "Command+Alt+KeyI"),
-        ("caseInvert", "Command+Alt+Shift+KeyI"),
         ("pauseAll", "Command+Alt+KeyP"),
         ("llmFix", "Command+Alt+KeyF"),
     ]
@@ -574,6 +570,9 @@ impl Config {
         for (key, value) in default_hotkeys() {
             self.hotkeys.entry(key).or_insert(value);
         }
+        for removed in ["caseUpper", "caseLower", "caseTitle", "caseInvert"] {
+            self.hotkeys.remove(removed);
+        }
         if self
             .hotkeys
             .get("dictate")
@@ -671,7 +670,6 @@ impl Config {
             Feature::Typos => rules.typos.unwrap_or(true),
             Feature::Voice => rules.voice.unwrap_or(true),
             Feature::Llm => rules.llm.unwrap_or(true),
-            Feature::Replacements => rules.replacements.unwrap_or(true),
             Feature::Capitalization => rules.capitalization.unwrap_or(true),
             Feature::Lists => rules.lists.unwrap_or(true),
             Feature::ShiftFix => rules.shift_fix.unwrap_or(true),
@@ -699,7 +697,6 @@ pub enum Feature {
     Typos,
     Voice,
     Llm,
-    Replacements,
     Capitalization,
     Lists,
     ShiftFix,
