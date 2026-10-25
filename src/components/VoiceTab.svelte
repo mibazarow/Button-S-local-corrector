@@ -294,17 +294,6 @@
   </div>
   {#if hotkeyError}<p class="error small">{hotkeyError}</p>{/if}
   <div class="row">
-    <div>
-      <span class="row-title">{t.language}</span>
-      <span class="row-sub">{t.languageAuto}</span>
-    </div>
-    <select class="select" bind:value={config.voice.language} onchange={persist}>
-      <option value="ru">{t.langRu}</option>
-      <option value="en">{t.langEn}</option>
-      <option value="auto">{t.langAuto}</option>
-    </select>
-  </div>
-  <div class="row">
     <span class="row-title">{t.microphone}</span>
     <select class="select" bind:value={config.voice.device} onchange={persist}>
       <option value="default">{t.micDefault}</option>

@@ -662,24 +662,10 @@ fn finish_recording(
         return;
     };
 
-    let language = {
-        let config = state.config.read();
-        if config.voice.language == "auto" {
-            None
-        } else {
-            Some(config.voice.language.clone())
-        }
-    };
     let punctuation = state.config.read().voice.punctuation;
     let remove_fillers = state.config.read().voice.remove_fillers;
 
-    let result = transcribe(
-        context,
-        &resampled,
-        language.as_deref(),
-        punctuation,
-        remove_fillers,
-    );
+    let result = transcribe(context, &resampled, punctuation, remove_fillers);
 
     match result {
         Ok(text) if !text.trim().is_empty() => {
@@ -713,14 +699,19 @@ fn finish_recording(
 fn transcribe(
     context: &whisper_rs::WhisperContext,
     samples: &[f32],
-    language: Option<&str>,
     punctuation: bool,
     remove_fillers: bool,
 ) -> Result<String, String> {
     use whisper_rs::{FullParams, SamplingStrategy};
 
+    let mut whisper_state = context
+        .create_state()
+        .map_err(|error| format!("Состояние модели: {error}"))?;
+
+    let language = detect_language(&mut whisper_state, samples, 4);
+
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-    params.set_language(language);
+    params.set_language(Some(language));
     params.set_print_special(false);
     params.set_print_progress(false);
     params.set_print_realtime(false);
@@ -728,9 +719,6 @@ fn transcribe(
     params.set_no_context(true);
     params.set_n_threads(4);
 
-    let mut whisper_state = context
-        .create_state()
-        .map_err(|error| format!("Состояние модели: {error}"))?;
     whisper_state
         .full(params, samples)
         .map_err(|error| format!("Ошибка распознавания: {error}"))?;
@@ -770,6 +758,36 @@ fn transcribe(
     }
 
     Ok(text)
+}
+
+/// Detects the language restricted to Russian and English only.
+/// Falls back to "ru" on any detection error.
+fn detect_language(
+    state: &mut whisper_rs::WhisperState,
+    samples: &[f32],
+    threads: usize,
+) -> &'static str {
+    if state.pcm_to_mel(samples, threads).is_err() {
+        return "ru";
+    }
+    let Ok((_best, probs)) = state.lang_detect(0, threads) else {
+        return "ru";
+    };
+    let probability = |code: &str| -> f32 {
+        whisper_rs::get_lang_id(code)
+            .and_then(|id| usize::try_from(id).ok())
+            .and_then(|id| probs.get(id).copied())
+            .unwrap_or(0.0)
+    };
+    pick_language(probability("ru"), probability("en"))
+}
+
+fn pick_language(ru: f32, en: f32) -> &'static str {
+    if en > ru {
+        "en"
+    } else {
+        "ru"
+    }
 }
 
 fn resample(input: &[f32], from: u32, to: u32) -> Vec<f32> {
@@ -993,6 +1011,26 @@ mod tests {
         assert!(log.contains("voice preload skipped: model not downloaded"));
         assert!(!log.contains(&dir.to_string_lossy().to_string()));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pick_language_prefers_ru_when_not_outranked() {
+        assert_eq!(pick_language(0.6, 0.4), "ru");
+    }
+
+    #[test]
+    fn pick_language_prefers_en_only_when_stronger() {
+        assert_eq!(pick_language(0.4, 0.6), "en");
+    }
+
+    #[test]
+    fn pick_language_resolves_ties_to_ru() {
+        assert_eq!(pick_language(0.5, 0.5), "ru");
+    }
+
+    #[test]
+    fn pick_language_resolves_zero_probabilities_to_ru() {
+        assert_eq!(pick_language(0.0, 0.0), "ru");
     }
 
     fn now_millis() -> u128 {
