@@ -259,20 +259,15 @@ fn probe_selection_via_clipboard() -> Option<String> {
     }
 
     let mut clipboard = arboard::Clipboard::new().ok()?;
-    let previous = clipboard.get_text().ok();
+    let previous = clipboard.get_text().ok()?;
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .unwrap_or(0);
     let sentinel = format!("button-s-probe-{nanos}");
 
-    let restore = |clipboard: &mut arboard::Clipboard| match previous.as_ref() {
-        Some(text) => {
-            let _ = clipboard.set_text(text.clone());
-        }
-        None => {
-            let _ = clipboard.clear();
-        }
+    let restore = |clipboard: &mut arboard::Clipboard| {
+        let _ = clipboard.set_text(previous.clone());
     };
 
     if clipboard.set_text(sentinel.clone()).is_err() {

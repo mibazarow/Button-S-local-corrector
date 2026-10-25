@@ -135,17 +135,15 @@ pub fn target_text() -> Option<(String, bool)> {
 
 fn clipboard_target_text() -> Option<(String, bool)> {
     let mut clipboard = arboard::Clipboard::new().ok()?;
-    let before = clipboard.get_text().ok();
+    let before = clipboard.get_text().ok()?;
     platform::copy_selection().ok()?;
     thread::sleep(Duration::from_millis(120));
-    let after = clipboard.get_text().ok()?;
+    let after = clipboard.get_text();
+    let _ = clipboard.set_text(before.clone());
 
-    if after.trim().is_empty() || before.as_deref() == Some(after.as_str()) {
+    let after = after.ok()?;
+    if after.trim().is_empty() || after == before {
         return None;
-    }
-
-    if let Some(before) = before {
-        let _ = clipboard.set_text(before);
     }
     Some((after, true))
 }
@@ -167,14 +165,18 @@ pub fn insert_result(state: &AppState, text: &str) -> Result<(), String> {
     }
 
     let mut clipboard = arboard::Clipboard::new().map_err(|error| error.to_string())?;
-    let previous = clipboard.get_text().ok();
-    clipboard
-        .set_text(text.to_string())
-        .map_err(|error| error.to_string())?;
-    platform::paste()?;
-    thread::sleep(Duration::from_millis(250));
-    if let Some(previous) = previous {
-        let _ = clipboard.set_text(previous);
+    match clipboard.get_text() {
+        Ok(previous) => {
+            if let Err(error) = clipboard.set_text(text.to_string()) {
+                let _ = clipboard.set_text(previous);
+                return Err(error.to_string());
+            }
+            let pasted = platform::paste();
+            thread::sleep(Duration::from_millis(250));
+            let _ = clipboard.set_text(previous);
+            pasted.map_err(|error| error.to_string())?;
+        }
+        Err(_) => platform::insert_text(text)?,
     }
 
     state.diag(&format!("ai insert ok: {} chars", text.chars().count()));

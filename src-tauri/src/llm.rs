@@ -8,7 +8,7 @@ use serde_json::json;
 use crate::config::{Llm, Provider};
 
 /// Системный промпт для всех провайдеров: короткий, чтобы префил был
-/// минимальным. `/no_think` отключает размышления Qwen3.
+/// минимальным.
 pub const SYSTEM_PROMPT: &str =
     "You are a text editor. Return ONLY the final text, with no introductions, explanations, labels, quotation marks, or markdown. Do not answer the text; perform the instruction on it. Write the result in the same language as the source text unless the instruction explicitly asks for translation.";
 
@@ -124,10 +124,14 @@ impl PromptStore {
     }
 
     pub fn load(path: &Path) -> Self {
-        let mut store = fs::read_to_string(path)
-            .ok()
-            .and_then(|raw| serde_json::from_str::<PromptStore>(&raw).ok())
-            .unwrap_or_default();
+        let mut store = match fs::read_to_string(path) {
+            Ok(raw) => serde_json::from_str::<PromptStore>(&raw).unwrap_or_else(|_| {
+                let backup = path.with_extension("json.broken");
+                let _ = fs::copy(path, &backup);
+                PromptStore::default()
+            }),
+            Err(_) => PromptStore::default(),
+        };
 
         for builtin in builtin_prompts() {
             match store
@@ -254,10 +258,14 @@ pub fn builtin_prompts() -> Vec<Prompt> {
 
 pub fn fill_template(template: &str, text: &str, language: &str, app: &str) -> String {
     let selection = text;
-    let clipboard = arboard::Clipboard::new()
-        .ok()
-        .and_then(|mut clipboard| clipboard.get_text().ok())
-        .unwrap_or_default();
+    let clipboard = if template.contains("{{clipboard}}") {
+        arboard::Clipboard::new()
+            .ok()
+            .and_then(|mut clipboard| clipboard.get_text().ok())
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
     let date = chrono_like_date();
 
     template
@@ -562,7 +570,13 @@ pub async fn complete(
     }
 
     if provider.kind == "local" {
-        return crate::llm_local::complete(model, prompt, temperature).await;
+        return crate::llm_local::complete(
+            model,
+            prompt,
+            temperature,
+            Duration::from_secs(provider.timeout_sec.max(30)),
+        )
+        .await;
     }
 
     let client = reqwest::Client::builder()
@@ -1056,6 +1070,24 @@ mod tests {
         assert_eq!(
             loaded.get("user-custom").map(|prompt| prompt.template.as_str()),
             Some("Переведи: {{text}}")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn corrupt_prompts_file_is_backed_up_before_defaults() {
+        let dir = std::env::temp_dir().join(format!("button-s-prompts-corrupt-{}", now_millis()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = PromptStore::path_in(&dir);
+        std::fs::write(&path, "{ not json").expect("write");
+
+        let loaded = PromptStore::load(&path);
+
+        assert_eq!(loaded.prompts.len(), builtin_prompts().len());
+        let backup = path.with_extension("json.broken");
+        assert_eq!(
+            std::fs::read_to_string(&backup).expect("backup"),
+            "{ not json"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

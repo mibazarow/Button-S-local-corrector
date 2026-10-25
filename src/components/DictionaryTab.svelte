@@ -26,6 +26,7 @@
           dictionary.words.map((entry) => ({
             word: entry.word,
             language: dictionary.language,
+            dictionaryId: dictionary.id,
           })),
         )
       : [],
@@ -136,7 +137,7 @@
         <tr><th>{t.colWord}</th><th>{t.colLanguage}</th><th></th></tr>
       </thead>
       <tbody>
-        {#each allWords as entry (entry.word)}
+        {#each allWords as entry (entry.dictionaryId + "\u0000" + entry.word)}
           <tr>
             <td>{entry.word}</td>
             <td class="muted">{entry.language.toUpperCase()}</td>

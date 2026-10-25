@@ -149,6 +149,8 @@ export interface UserDictionaryFile {
   dictionaries: NamedDictionary[];
   stopPairs: [string, string][];
   undoCounts: Record<string, number>;
+  layoutReverts: Record<string, number>;
+  dictReplacements: Record<string, number>;
 }
 
 export interface Prompt {

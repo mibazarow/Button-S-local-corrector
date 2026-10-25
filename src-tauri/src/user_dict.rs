@@ -82,10 +82,14 @@ impl UserDictionaryFile {
     }
 
     pub fn load(path: &Path) -> Self {
-        fs::read_to_string(path)
-            .ok()
-            .and_then(|raw| serde_json::from_str(&raw).ok())
-            .unwrap_or_default()
+        match fs::read_to_string(path) {
+            Ok(raw) => serde_json::from_str(&raw).unwrap_or_else(|_| {
+                let backup = path.with_extension("json.broken");
+                let _ = fs::copy(path, &backup);
+                Self::default()
+            }),
+            Err(_) => Self::default(),
+        }
     }
 
     pub fn save(&self, path: &Path) -> Result<(), String> {
@@ -347,5 +351,51 @@ mod tests {
         assert!(!file.note_dict_replacement("   "));
         assert!(file.layout_reverts.is_empty());
         assert!(file.dict_replacements.is_empty());
+    }
+
+    #[test]
+    fn corrupt_file_is_backed_up_before_defaults() {
+        let dir = std::env::temp_dir().join(format!("button-s-dict-{}", now_millis()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = UserDictionaryFile::path_in(&dir);
+        std::fs::write(&path, "{ not json").expect("write");
+
+        let loaded = UserDictionaryFile::load(&path);
+
+        assert_eq!(loaded.dictionaries.len(), 1);
+        assert_eq!(loaded.dictionaries[0].id, "personal");
+        let backup = path.with_extension("json.broken");
+        assert_eq!(
+            std::fs::read_to_string(&backup).expect("backup"),
+            "{ not json"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn valid_file_round_trips_without_backup() {
+        let dir = std::env::temp_dir().join(format!("button-s-dict-valid-{}", now_millis()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = UserDictionaryFile::path_in(&dir);
+        let mut file = UserDictionaryFile::default();
+        assert!(file.add("personal", "мышка", "ru"));
+
+        file.save(&path).expect("save");
+        let loaded = UserDictionaryFile::load(&path);
+
+        assert!(loaded.contains("Мышка"));
+        assert!(!path.with_extension("json.broken").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn missing_file_loads_defaults_without_backup() {
+        let dir = std::env::temp_dir().join(format!("button-s-dict-missing-{}", now_millis()));
+        let path = UserDictionaryFile::path_in(&dir);
+
+        let loaded = UserDictionaryFile::load(&path);
+
+        assert_eq!(loaded.dictionaries.len(), 1);
+        assert!(!path.with_extension("json.broken").exists());
     }
 }

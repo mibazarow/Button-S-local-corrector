@@ -5,9 +5,11 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::sync::OnceLock;
+use std::time::Duration;
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -65,7 +67,7 @@ static WORKER: OnceLock<Mutex<Option<Worker>>> = OnceLock::new();
 struct Worker {
     child: Child,
     stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
+    lines: mpsc::Receiver<Result<String, String>>,
 }
 
 #[derive(Serialize)]
@@ -73,7 +75,6 @@ struct WorkerRequest {
     model: String,
     prompt: String,
     temperature: f32,
-    qwen3: bool,
 }
 
 #[derive(Deserialize)]
@@ -299,6 +300,7 @@ pub async fn complete(
     model_id: &str,
     prompt: &str,
     temperature: f32,
+    timeout: Duration,
 ) -> Result<String, String> {
     let item = spec(model_id)?;
     let dir = DIR
@@ -314,15 +316,14 @@ pub async fn complete(
         model: path.to_string_lossy().to_string(),
         prompt: prompt.to_string(),
         temperature,
-        qwen3: model_id.starts_with("qwen3"),
     };
 
-    tauri::async_runtime::spawn_blocking(move || send_request(&request))
+    tauri::async_runtime::spawn_blocking(move || send_request(&request, timeout))
         .await
         .map_err(|error| format!("Ошибка локальной модели: {error}"))?
 }
 
-fn send_request(request: &WorkerRequest) -> Result<String, String> {
+fn send_request(request: &WorkerRequest, timeout: Duration) -> Result<String, String> {
     let worker = WORKER.get_or_init(|| Mutex::new(None));
     let mut guard = worker.lock();
 
@@ -330,26 +331,38 @@ fn send_request(request: &WorkerRequest) -> Result<String, String> {
         *guard = Some(spawn_worker()?);
     }
 
-    let result = roundtrip(guard.as_mut().expect("worker just started"), request);
+    let result = roundtrip(guard.as_mut().expect("worker just started"), request, timeout);
     if result.is_err() {
-        *guard = None;
+        if let Some(mut worker) = guard.take() {
+            let _ = worker.child.kill();
+            let _ = worker.child.wait();
+        }
     }
     result
 }
 
-fn roundtrip(worker: &mut Worker, request: &WorkerRequest) -> Result<String, String> {
+fn roundtrip(
+    worker: &mut Worker,
+    request: &WorkerRequest,
+    timeout: Duration,
+) -> Result<String, String> {
     let line = serde_json::to_string(request).map_err(|error| error.to_string())?;
     writeln!(worker.stdin, "{line}").map_err(|error| error.to_string())?;
     worker.stdin.flush().map_err(|error| error.to_string())?;
 
-    let mut response = String::new();
-    let read = worker
-        .stdout
-        .read_line(&mut response)
-        .map_err(|error| error.to_string())?;
-    if read == 0 {
-        return Err("Локальный движок завершился".into());
-    }
+    let response = match worker.lines.recv_timeout(timeout) {
+        Ok(Ok(line)) => line,
+        Ok(Err(error)) => return Err(error),
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            return Err(format!(
+                "Локальная модель не ответила за {} с",
+                timeout.as_secs().max(1)
+            ));
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            return Err("Локальный движок завершился".into());
+        }
+    };
 
     let response: WorkerResponse =
         serde_json::from_str(&response).map_err(|error| error.to_string())?;
@@ -383,28 +396,49 @@ fn spawn_worker() -> Result<Worker, String> {
         .take()
         .ok_or("Нет stdout локального движка")?;
 
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut reader = BufReader::new(stdout);
+        loop {
+            let mut line = String::new();
+            match reader.read_line(&mut line) {
+                Ok(0) => break,
+                Ok(_) => {
+                    if tx.send(Ok(line)).is_err() {
+                        break;
+                    }
+                }
+                Err(error) => {
+                    let _ = tx.send(Err(error.to_string()));
+                    break;
+                }
+            }
+        }
+    });
+
     Ok(Worker {
         child,
         stdin,
-        stdout: BufReader::new(stdout),
+        lines: rx,
     })
 }
 
 fn worker_path() -> Result<PathBuf, String> {
+    let exe = format!("button-s-llm{}", std::env::consts::EXE_SUFFIX);
     let mut candidates = Vec::new();
 
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            candidates.push(dir.join("button-s-llm"));
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(dir) = exe_path.parent() {
+            candidates.push(dir.join(&exe));
             if let Some(parent) = dir.parent() {
-                candidates.push(parent.join("button-s-llm"));
+                candidates.push(parent.join(&exe));
             }
         }
     }
 
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    candidates.push(manifest.join("target/release/button-s-llm"));
-    candidates.push(manifest.join("target/debug/button-s-llm"));
+    candidates.push(manifest.join("target/release").join(&exe));
+    candidates.push(manifest.join("target/debug").join(&exe));
 
     candidates
         .into_iter()

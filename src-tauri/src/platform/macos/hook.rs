@@ -242,9 +242,10 @@ fn run_tap(sender: Sender<KeyEvent>, state: Arc<AppState>) {
 
         if port.is_null() {
             drop(Box::from_raw(raw_ctx));
-            state.set_error(Some(
-                "Нет доступа к перехвату ввода. Разрешите «Универсальный доступ» и перезапустите BUTTON-S.".into(),
-            ));
+            let message = "Нет доступа к перехвату ввода. Разрешите «Универсальный доступ» и перезапустите BUTTON-S.";
+            if state.last_error.read().as_deref() != Some(message) {
+                state.set_error(Some(message.into()));
+            }
             return;
         }
 
@@ -262,7 +263,9 @@ fn run_tap(sender: Sender<KeyEvent>, state: Arc<AppState>) {
         CFRunLoopAddSource(run_loop, source, kCFRunLoopCommonModes);
 
         state.hook_running.store(true, Ordering::Relaxed);
-        state.set_error(None);
+        if state.last_error.read().is_some() {
+            state.set_error(None);
+        }
 
         CFRunLoopRun();
 

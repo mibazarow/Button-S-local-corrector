@@ -16,7 +16,6 @@ const LOCAL_MAX_INPUT_TOKENS: usize = 4100;
 const LOCAL_MAX_OUTPUT_TOKENS: usize = 4100;
 const MIN_CONTEXT: u32 = 1024;
 const PREFILL_CHUNK: usize = 512;
-const THINK_END_MARKERS: [&str; 2] = ["</think>", "<｜end▁of▁thinking｜>"];
 const SYSTEM_PROMPT: &str =
     "You are a text editor. Return ONLY the final text, with no introductions, explanations, labels, quotation marks, or markdown. Do not answer the text; perform the instruction on it. Write the result in the same language as the source text unless the instruction explicitly asks for translation.";
 
@@ -25,7 +24,6 @@ struct Request {
     model: String,
     prompt: String,
     temperature: f32,
-    qwen3: bool,
 }
 
 #[derive(Serialize)]
@@ -184,7 +182,7 @@ fn run_request(request: Request, loaded: &mut Option<(String, LlamaModel)>) -> R
         };
     };
 
-    match generate(model, &request.prompt, request.temperature, request.qwen3) {
+    match generate(model, &request.prompt, request.temperature) {
         Ok(text) => Response {
             ok: true,
             text: Some(text),
@@ -198,21 +196,11 @@ fn run_request(request: Request, loaded: &mut Option<(String, LlamaModel)>) -> R
     }
 }
 
-fn generate(
-    model: &LlamaModel,
-    prompt: &str,
-    temperature: f32,
-    is_qwen3: bool,
-) -> Result<String, String> {
+fn generate(model: &LlamaModel, prompt: &str, temperature: f32) -> Result<String, String> {
     let template = model
         .chat_template(None)
         .map_err(|_| "У модели нет chat-шаблона".to_string())?;
-    let system_text = if is_qwen3 {
-        format!("{SYSTEM_PROMPT} /no_think")
-    } else {
-        SYSTEM_PROMPT.to_string()
-    };
-    let system = llama_cpp_2::model::LlamaChatMessage::new("system".into(), system_text)
+    let system = llama_cpp_2::model::LlamaChatMessage::new("system".into(), SYSTEM_PROMPT.to_string())
         .map_err(|error| error.to_string())?;
     let user = llama_cpp_2::model::LlamaChatMessage::new("user".into(), prompt.to_string())
         .map_err(|error| error.to_string())?;
@@ -288,27 +276,11 @@ fn generate(
     }
 
     let decoded = vocab.detokenize(&output_tokens, true, true);
-    let text = strip_thinking(&String::from_utf8_lossy(&decoded));
+    let text = String::from_utf8_lossy(&decoded).trim().to_string();
     if text.is_empty() {
         return Err("Локальная модель вернула пустой ответ".into());
     }
     Ok(text)
-}
-
-fn strip_thinking(text: &str) -> String {
-    let mut start = 0;
-    for marker in THINK_END_MARKERS {
-        if let Some(index) = text.rfind(marker) {
-            start = start.max(index + marker.len());
-        }
-    }
-    if start > 0 {
-        return text[start..].trim().to_string();
-    }
-    if text.contains("</think") || text.contains("<think") {
-        return String::new();
-    }
-    text.trim().to_string()
 }
 
 #[cfg(test)]
