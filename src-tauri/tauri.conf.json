@@ -48,7 +48,8 @@
     ],
     "macOS": {
       "minimumSystemVersion": "13.0",
-      "signingIdentity": "Apple Development: Mihail Bazarov (S6LCYMJRBD)"
+      "signingIdentity": "Apple Development: Mihail Bazarov (S6LCYMJRBD)",
+      "entitlements": "Entitlements.plist"
     }
   }
 }
