@@ -42,12 +42,21 @@ pub fn secure_input() -> bool {
     unsafe { IsSecureEventInputEnabled() }
 }
 
-pub fn microphone() -> bool {
+pub fn microphone_status() -> &'static str {
     let media = NSString::from_str("soun");
     unsafe {
-        AVCaptureDevice::authorizationStatusForMediaType(&media)
-            == AVAuthorizationStatus::Authorized
+        match AVCaptureDevice::authorizationStatusForMediaType(&media) {
+            AVAuthorizationStatus::Authorized => "authorized",
+            AVAuthorizationStatus::Denied => "denied",
+            AVAuthorizationStatus::Restricted => "restricted",
+            AVAuthorizationStatus::NotDetermined => "notDetermined",
+            _ => "unknown",
+        }
     }
+}
+
+pub fn microphone() -> bool {
+    microphone_status() == "authorized"
 }
 
 pub fn request_microphone() {
@@ -64,10 +73,12 @@ pub fn request_microphone() {
 }
 
 pub fn current() -> Permissions {
+    let microphone_status = microphone_status();
     Permissions {
         accessibility: accessibility(),
         input_monitoring: input_monitoring(),
-        microphone: microphone(),
+        microphone: microphone_status == "authorized",
+        microphone_status: microphone_status.to_string(),
         secure_input: secure_input(),
     }
 }
@@ -83,7 +94,10 @@ pub fn open_settings(kind: &str) -> Result<(), String> {
             "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
         }
         "microphone" => {
-            request_microphone();
+            if microphone_status() == "notDetermined" {
+                request_microphone();
+                return Ok(());
+            }
             "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
         }
         _ => return Err("unknown permission".into()),

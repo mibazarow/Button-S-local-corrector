@@ -22,6 +22,7 @@ export interface Permissions {
   accessibility: boolean;
   inputMonitoring: boolean;
   microphone: boolean;
+  microphoneStatus: string;
   secureInput: boolean;
 }
 

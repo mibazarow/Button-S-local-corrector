@@ -44,6 +44,9 @@ const ru = {
   permissionsHint:
     "Разрешения выдаются в системных настройках macOS. После выдачи перезапустите BUTTON-S.",
   microphoneHint: "Микрофон нужен только для голосового ввода.",
+  allowAccess: "Разрешить",
+  microphoneDeniedHint:
+    "macOS уже запомнил отказ и не показывает запрос повторно — включите тумблер в системных настройках.",
   onboardingTitle: "Первый запуск",
   onboardingSteps:
     "1. Выдайте «Универсальный доступ» и «Мониторинг ввода».\n2. Перезапустите BUTTON-S.\n3. Наберите ghbdtn в любом приложении и поставьте пробел.",
@@ -455,6 +458,9 @@ const en: Strings = {
   permissionsHint:
     "Permissions are granted in macOS System Settings. Restart BUTTON-S afterwards.",
   microphoneHint: "The microphone is only needed for voice input.",
+  allowAccess: "Allow",
+  microphoneDeniedHint:
+    "macOS remembers a previous denial and will not ask again — enable the toggle in System Settings.",
   onboardingTitle: "First launch",
   onboardingSteps:
     "1. Grant Accessibility and Input Monitoring.\n2. Restart BUTTON-S.\n3. Type ghbdtn in any app and press space.",

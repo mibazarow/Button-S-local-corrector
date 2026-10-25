@@ -5,12 +5,13 @@ use serde::Serialize;
 
 use crate::state::AppState;
 
-#[derive(Debug, Clone, Copy, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Permissions {
     pub accessibility: bool,
     pub input_monitoring: bool,
     pub microphone: bool,
+    pub microphone_status: String,
     pub secure_input: bool,
 }
 

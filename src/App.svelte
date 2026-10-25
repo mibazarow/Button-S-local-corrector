@@ -286,10 +286,15 @@
                     {snapshot.permissions.microphone ? t.granted : t.denied}
                   </span>
                   {#if !snapshot.permissions.microphone}
-                    <button class="btn small" onclick={() => api.openPermission("microphone")}>{t.open}</button>
+                    <button class="btn small" onclick={() => api.openPermission("microphone")}>
+                      {snapshot.permissions.microphoneStatus === "notDetermined" ? t.allowAccess : t.open}
+                    </button>
                   {/if}
                 </div>
               </div>
+              {#if snapshot.permissions.microphoneStatus === "denied" || snapshot.permissions.microphoneStatus === "restricted"}
+                <p class="hint">{t.microphoneDeniedHint}</p>
+              {/if}
               <p class="hint">{t.permissionsHint}</p>
               <p class="hint">{t.microphoneHint}</p>
             </section>
