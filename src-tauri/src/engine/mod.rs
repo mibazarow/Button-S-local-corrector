@@ -18,6 +18,7 @@ pub fn start(state: Arc<AppState>) {
 
     thread::spawn(move || {
         let mut buffer = String::new();
+        let mut line = String::new();
         let mut sentence_start = false;
 
         for event in receiver {
@@ -26,13 +27,24 @@ pub fn start(state: Arc<AppState>) {
                     if buffer.chars().count() < 128 {
                         buffer.push(ch);
                     }
+                    if line.chars().count() < 1024 {
+                        line.push(ch);
+                    }
                     handle_char(&state, &mut buffer, &mut sentence_start, ch);
                 }
                 KeyEvent::Backspace => {
                     buffer.pop();
+                    line.pop();
                     sentence_start = false;
                 }
                 KeyEvent::Boundary(separator) => {
+                    let previous_line = if separator == '\n' {
+                        Some(std::mem::take(&mut line))
+                    } else {
+                        line.push(separator);
+                        None
+                    };
+
                     let word = std::mem::take(&mut buffer);
                     let replacement = handle_boundary(&state, &word, separator);
                     update_sentence_state(
@@ -41,15 +53,20 @@ pub fn start(state: Arc<AppState>) {
                         replacement.as_deref().unwrap_or(&word),
                         separator,
                     );
-                    if separator == '\n' {
-                        continue_list(&state);
+
+                    if let Some(previous_line) = previous_line {
+                        if let Some(marker) = continue_list(&state, &previous_line) {
+                            line.push_str(&marker);
+                        }
                     }
                 }
                 KeyEvent::Reset => {
                     buffer.clear();
+                    line.clear();
                 }
                 KeyEvent::Shortcut => {
                     buffer.clear();
+                    line.clear();
                 }
                 KeyEvent::Dictate(pressed) => {
                     if let Some(app) = state.app_handle() {
@@ -219,6 +236,38 @@ fn handle_boundary(state: &Arc<AppState>, word: &str, separator: char) -> Option
         }
     }
 
+    let layout_decision = if layout_enabled {
+        let config = state.config.read();
+        layout::decide(word, &config.layout)
+    } else {
+        None
+    };
+    let source_is_known = typo::language_of_word(word)
+        .map(|language| dictionary::dictionary().score(language, word) > 0.0)
+        .unwrap_or(false);
+
+    if !source_is_known {
+        if let Some(decision) = layout_decision.as_ref() {
+            if apply_change(
+                state,
+                &app_id,
+                expected,
+                ChangeKind::Layout,
+                "layout",
+                word,
+                &decision.text,
+                separator,
+                auto_switch,
+            ) {
+                log::info!(
+                    "layout correction applied before typo, confidence {:.2}",
+                    decision.confidence
+                );
+                return Some(decision.text.clone());
+            }
+        }
+    }
+
     if typos_enabled && typo_mode != "off" {
         if let Some(language) = typo::language_of_word(word) {
             let stopped = {
@@ -266,29 +315,23 @@ fn handle_boundary(state: &Arc<AppState>, word: &str, separator: char) -> Option
         }
     }
 
-    if layout_enabled {
-        let decision = {
-            let config = state.config.read();
-            layout::decide(word, &config.layout)
-        };
-        if let Some(decision) = decision {
-            if apply_change(
-                state,
-                &app_id,
-                expected,
-                ChangeKind::Layout,
-                "layout",
-                word,
-                &decision.text,
-                separator,
-                auto_switch,
-            ) {
-                log::info!(
-                    "layout correction applied, confidence {:.2}",
-                    decision.confidence
-                );
-                return Some(decision.text);
-            }
+    if let Some(decision) = layout_decision {
+        if apply_change(
+            state,
+            &app_id,
+            expected,
+            ChangeKind::Layout,
+            "layout",
+            word,
+            &decision.text,
+            separator,
+            auto_switch,
+        ) {
+            log::info!(
+                "layout correction applied, confidence {:.2}",
+                decision.confidence
+            );
+            return Some(decision.text);
         }
     }
 
@@ -346,7 +389,7 @@ fn apply_change(
 
     if auto_switch {
         if let Some(language) = platform::language_for_text(replacement) {
-            state.switch_layout(language);
+            state.switch_layout_blocking(language);
         }
     }
 
@@ -383,7 +426,7 @@ fn update_sentence_state(
     };
 }
 
-fn continue_list(state: &Arc<AppState>) {
+fn continue_list(state: &Arc<AppState>, previous_line: &str) -> Option<String> {
     let (enabled, excluded) = {
         let config = state.config.read();
         let app_id = platform::frontmost_bundle_id().unwrap_or_default();
@@ -392,35 +435,23 @@ fn continue_list(state: &Arc<AppState>) {
             app_id.is_empty(),
         )
     };
-    if !enabled || excluded {
-        return;
+    if !enabled || excluded || previous_line.trim().is_empty() {
+        return None;
     }
 
-    let Some(context) = platform::ax_context(4096) else {
-        return;
-    };
-
-    let mut lines = context.before.rsplit('\n');
-    let current = lines.next().unwrap_or("");
-    if !current.trim().is_empty() {
-        return;
+    let marker = rules::list_continuation(previous_line)?;
+    if platform::insert_text(&marker).is_err() {
+        return None;
     }
-    let Some(previous) = lines.next() else {
-        return;
-    };
-    let Some(marker) = rules::list_continuation(previous) else {
-        return;
-    };
 
-    if platform::insert_text(&marker).is_ok() {
-        state.record_history(
-            "replace",
-            None,
-            None,
-            Some(&marker),
-            Some("list-continuation"),
-        );
-    }
+    state.record_history(
+        "replace",
+        None,
+        None,
+        Some(&marker),
+        Some("list-continuation"),
+    );
+    Some(marker)
 }
 
 fn truncate_chars(text: &mut String, count: usize) {

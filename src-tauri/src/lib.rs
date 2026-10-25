@@ -38,7 +38,7 @@ fn create_aux_windows(app: &tauri::AppHandle) -> tauri::Result<()> {
     #[cfg(target_os = "macos")]
     WebviewWindowBuilder::new(app, "hud", WebviewUrl::App("index.html#hud".into()))
         .title("BUTTON-S")
-        .inner_size(280.0, 76.0)
+        .inner_size(240.0, 20.0)
         .decorations(false)
         .transparent(true)
         .shadow(false)

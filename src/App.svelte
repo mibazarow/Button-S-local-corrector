@@ -368,19 +368,20 @@
 
           <section class="card">
             <h3>{t.check}</h3>
-            <input
+            <textarea
               class="input"
-              style="width:100%"
+              rows="2"
               value={testInput}
               placeholder={t.checkPlaceholder}
               spellcheck="false"
               autocomplete="off"
               oninput={(event) => runTest(event.currentTarget.value)}
-            />
+            ></textarea>
             {#if testResult}
               <div class="result" style="margin-top:8px">
                 {#if testResult.changed}
-                  <span class="muted">{testResult.input} → </span><strong>{testResult.output}</strong>
+                  <span class="muted small">{t.checkResult}</span>
+                  <div class="preview-output">{testResult.output}</div>
                 {:else}
                   <span class="muted">{t.unchanged}</span>
                 {/if}
@@ -426,6 +427,14 @@
     align-items: center;
     justify-content: space-between;
     gap: 16px;
+  }
+
+  .preview-output {
+    margin-top: 3px;
+    font-size: 14px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
   }
 
   .toast {

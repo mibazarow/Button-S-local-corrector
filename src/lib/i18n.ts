@@ -70,8 +70,10 @@ const ru = {
   recognizing: "Распознаём…",
   recording: "Запись",
   check: "Проверка",
-  checkPlaceholder: "Наберите ghbdtn",
-  checkHint: "Словари русского и английского уже внутри. Интернет не нужен.",
+  checkPlaceholder: "Введите фразу для проверки — например, ghbdtn",
+  checkHint:
+    "Проверка работает локально: раскладка, опечатки и залипший Shift. Словари уже внутри, интернет не нужен.",
+  checkResult: "Результат",
   unchanged: "Без изменений",
   hudRelease: "Отпустите клавишу, чтобы вставить текст",
   hudSeconds: "Это занимает несколько секунд",
@@ -137,7 +139,7 @@ const ru = {
   // Словарь
   dictionaryIntroTitle: "Зачем нужен словарь",
   dictionaryIntroText:
-    "Добавьте имена, термины и названия, которые BUTTON-S не должен исправлять. Слова отсюда важнее автозамены и исправления опечаток. Можно добавить слово из выделения.",
+    "Добавьте имена, термины и названия, которые BUTTON-S не должен исправлять. Слова отсюда важнее автозамены и исправления опечаток. Введите слово и нажмите «Добавить».",
   dictionaries: "Словари",
   wordsUnit: "слов",
   newDictionary: "Новый словарь",
@@ -163,7 +165,7 @@ const ru = {
   // Замены
   rulesIntroTitle: "Как работают автозамены",
   rulesIntroText:
-    "Слева — что вы печатаете, справа — что появится. «Сразу» срабатывает по ходу набора, «пробел» — после слова. Встроенные правила можно менять и дополнять.",
+    "Слева — что вы печатаете, справа — что появится. «Сразу» срабатывает по ходу набора, «пробел» — после слова. Все встроенные правила по умолчанию выключены — включите нужные.",
   replacements: "Автозамены",
   builtin: "Встроенные",
   colInput: "Ввод",
@@ -484,8 +486,10 @@ const en: Strings = {
   recognizing: "Recognizing…",
   recording: "Recording",
   check: "Check",
-  checkPlaceholder: "Type ghbdtn",
-  checkHint: "Russian and English dictionaries are built in. No internet needed.",
+  checkPlaceholder: "Type a phrase to test — e.g. ghbdtn",
+  checkHint:
+    "Runs locally: layout, typos and stuck Shift. Dictionaries are built in; no internet needed.",
+  checkResult: "Result",
   unchanged: "No changes",
   hudRelease: "Release the key to insert the text",
   hudSeconds: "This takes a few seconds",
@@ -551,7 +555,7 @@ const en: Strings = {
   // Dictionary
   dictionaryIntroTitle: "What the dictionary is for",
   dictionaryIntroText:
-    "Add names, terms and titles that BUTTON-S must never correct. Dictionary words take priority over autocorrect and typo fix. You can add a word straight from the selection.",
+    "Add names, terms and titles that BUTTON-S must never correct. Dictionary words take priority over autocorrect and typo fix. Type a word and press Add.",
   dictionaries: "Dictionaries",
   wordsUnit: "words",
   newDictionary: "New dictionary",
@@ -576,7 +580,7 @@ const en: Strings = {
   // Rules
   rulesIntroTitle: "How replacements work",
   rulesIntroText:
-    "Left is what you type, right is what appears. “Instant” fires while typing, “space” after the word. You can edit and add your own rules.",
+    "Left is what you type, right is what appears. “Instant” fires while typing, “space” after the word. All built-in rules are off by default — enable the ones you need.",
   replacements: "Replacements",
   builtin: "Built-ins",
   colInput: "Input",

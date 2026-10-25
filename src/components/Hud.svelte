@@ -1,28 +1,16 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { listen } from "@tauri-apps/api/event";
-  import { api, type Language } from "../lib/api";
-  import { strings } from "../lib/i18n";
 
   let voiceState = $state("idle");
   let level = $state(0);
-  let text = $state("");
-  let lang = $state<Language>("ru");
-  const t = $derived(strings[lang]);
 
   onMount(() => {
-    api
-      .getState()
-      .then((state) => {
-        lang = (state.settings.uiLanguage as Language) ?? "ru";
-      })
-      .catch(() => {});
-    const stop = listen<{ state: string; level?: number; text?: string }>(
+    const stop = listen<{ state: string; level?: number }>(
       "voice-state",
       (event) => {
         voiceState = event.payload.state;
         if (typeof event.payload.level === "number") level = event.payload.level;
-        if (event.payload.text) text = event.payload.text;
       },
     );
     return () => {
@@ -31,77 +19,64 @@
   });
 </script>
 
-<div class="hud">
-  {#if voiceState === "recording"}
-    <div class="recording"><span class="pulse"></span>{t.recording}</div>
-    <div class="bar"><span style={`width:${Math.min(100, Math.round(level * 900))}%`}></span></div>
-    <div class="tip">{t.hudRelease}</div>
-  {:else if voiceState === "processing"}
-    <div class="processing">{t.recognizing}</div>
-    <div class="bar"><span style="width:100%"></span></div>
-    <div class="tip">{t.hudSeconds}</div>
-  {:else if voiceState === "done"}
-    <div class="processing">{t.ready}</div>
-    <div class="tip">{text.slice(0, 90)}</div>
-  {:else}
-    <div class="processing">BUTTON-S</div>
-  {/if}
+<div
+  class="hud"
+  class:processing={voiceState === "processing"}
+  class:done={voiceState === "done"}
+>
+  <div class="track">
+    <span
+      class="fill"
+      style={voiceState === "recording"
+        ? `width:${Math.min(100, Math.max(4, Math.round(level * 900)))}%`
+        : undefined}
+    ></span>
+  </div>
 </div>
 
 <style>
   .hud {
-    margin: 8px;
-    padding: 12px 14px;
-    border-radius: 14px;
-    background: rgba(28, 28, 32, 0.92);
-    color: #fff;
+    padding: 6px 8px;
     font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-    box-shadow: 0 8px 30px rgb(0 0 0 / 0.35);
-    backdrop-filter: blur(16px);
   }
-  .recording {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    font-size: 12px;
-    font-weight: 700;
-    color: #ff7b72;
-  }
-  .pulse {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #ff453a;
-    animation: pulse 1s infinite;
-  }
-  @keyframes pulse {
-    50% {
-      opacity: 0.25;
-    }
-  }
-  .processing {
-    font-size: 12px;
-    font-weight: 650;
-  }
-  .bar {
-    margin-top: 8px;
-    height: 5px;
-    border-radius: 4px;
-    background: rgba(255, 255, 255, 0.16);
+
+  .track {
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(18, 19, 23, 0.62);
+    box-shadow:
+      0 1px 8px rgb(0 0 0 / 0.3),
+      inset 0 0 0 1px rgb(255 255 255 / 0.12);
     overflow: hidden;
   }
-  .bar span {
+
+  .fill {
     display: block;
     height: 100%;
-    background: #ff7b72;
-    transition: width 0.15s linear;
+    width: 4%;
+    min-width: 4px;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #ff6b61, #ff9f0a);
+    transition: width 0.12s linear;
   }
-  .tip {
-    margin-top: 7px;
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.65);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+
+  .processing .fill {
+    width: 35%;
+    background: linear-gradient(90deg, #5b94ff, #8fb6ff);
+    animation: slide 1.1s ease-in-out infinite;
+  }
+
+  .done .fill {
+    width: 100%;
+    background: #6ddba5;
+  }
+
+  @keyframes slide {
+    0% {
+      transform: translateX(-120%);
+    }
+    100% {
+      transform: translateX(320%);
+    }
   }
 </style>

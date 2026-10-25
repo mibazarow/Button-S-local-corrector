@@ -140,7 +140,9 @@ pub fn is_abbreviation(word: &str) -> bool {
 }
 
 pub fn list_continuation(previous_line: &str) -> Option<String> {
-    let trimmed = previous_line.trim_end();
+    let indent_length = previous_line.len() - previous_line.trim_start().len();
+    let indent = &previous_line[..indent_length];
+    let trimmed = previous_line.trim();
     if trimmed.is_empty() {
         return None;
     }
@@ -153,7 +155,7 @@ pub fn list_continuation(previous_line: &str) -> Option<String> {
         if rest.is_empty() {
             return None;
         }
-        return Some(format!("{} ", first));
+        return Some(format!("{indent}{} ", first));
     }
 
     let marker_end = trimmed.find(' ')?;
@@ -170,7 +172,7 @@ pub fn list_continuation(previous_line: &str) -> Option<String> {
     let body = &marker[..marker.len() - delimiter.len_utf8()];
 
     if let Ok(number) = body.parse::<u32>() {
-        return Some(format!("{}{} ", number + 1, delimiter));
+        return Some(format!("{indent}{}{} ", number + 1, delimiter));
     }
 
     let mut body_chars = body.chars();
@@ -181,7 +183,7 @@ pub fn list_continuation(previous_line: &str) -> Option<String> {
 
     let next = char::from_u32(letter as u32 + 1).filter(|c| c.is_alphabetic())?;
 
-    Some(format!("{}{} ", next, delimiter))
+    Some(format!("{indent}{}{} ", next, delimiter))
 }
 
 #[cfg(test)]
@@ -191,14 +193,20 @@ mod tests {
 
     #[test]
     fn applies_immediate_symbol_rule() {
-        let rules = default_replacements();
+        let mut rules = default_replacements();
+        for rule in &mut rules {
+            rule.enabled = true;
+        }
         let value = immediate("a->", &rules, "app").expect("rule");
         assert_eq!(value, (2, "→".into()));
     }
 
     #[test]
     fn applies_space_rule_with_prefix() {
-        let rules = default_replacements();
+        let mut rules = default_replacements();
+        for rule in &mut rules {
+            rule.enabled = true;
+        }
         let value = apply_boundary("foo(c)", ' ', &rules, "app").expect("rule");
         assert_eq!(value, "foo©");
     }
@@ -215,6 +223,7 @@ mod tests {
         assert_eq!(list_continuation("1. Первый"), Some("2. ".into()));
         assert_eq!(list_continuation("a) пункт"), Some("b) ".into()));
         assert_eq!(list_continuation("- пункт"), Some("- ".into()));
+        assert_eq!(list_continuation("  - вложенный"), Some("  - ".into()));
         assert_eq!(list_continuation("просто текст"), None);
         assert_eq!(list_continuation("1. "), None);
     }

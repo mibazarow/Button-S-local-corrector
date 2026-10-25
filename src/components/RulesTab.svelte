@@ -21,10 +21,11 @@
     from,
     to,
     trigger: ["(c)", "(r)", "(tm)"].includes(from) ? "space" : "immediate",
-    enabled: true,
+    enabled: false,
     caseSensitive: false,
     wholeWord: false,
     apps: [],
+
   }));
 
   async function persist() {

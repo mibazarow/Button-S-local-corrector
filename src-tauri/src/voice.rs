@@ -696,9 +696,9 @@ fn show_hud(app: &AppHandle, _state: &AppState) {
         if let Ok(Some(monitor)) = window.current_monitor() {
             let size = monitor.size();
             let scale = monitor.scale_factor();
-            let width = 280.0;
+            let width = 240.0;
             let x = (size.width as f64 / scale - width) / 2.0;
-            let _ = window.set_position(tauri::LogicalPosition::new(x, 24.0));
+            let _ = window.set_position(tauri::LogicalPosition::new(x, 14.0));
         }
         let _ = window.show();
         let _ = app.emit_to("hud", "voice-state", json!({ "state": "recording", "level": 0 }));

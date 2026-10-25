@@ -9,7 +9,7 @@ use tauri_plugin_autostart::ManagerExt;
 
 use crate::actions;
 use crate::config::{is_modifier_only_combo, Config, Provider, SettingsPatch};
-use crate::engine::layout;
+use crate::engine::{dictionary, layout, rules, typo};
 use crate::history::{self, HistoryEvent, HistoryStats};
 use crate::hotkeys;
 use crate::llm::{self, Prompt, PromptStore};
@@ -130,33 +130,83 @@ pub fn update_settings(
     Ok(state.snapshot())
 }
 
-#[tauri::command]
-pub fn test_convert(state: State<'_, Arc<AppState>>, word: String) -> ConversionResult {
-    let trimmed = word.trim();
-
-    if trimmed.is_empty() || trimmed.split_whitespace().count() > 1 {
-        return ConversionResult {
-            input: word.clone(),
-            output: word,
-            changed: false,
-            confidence: 0.0,
-        };
+fn preview_word(word: &str, config: &Config) -> (String, bool) {
+    if config.shift_fix.enabled {
+        if let Some(fixed) = rules::fix_stuck_shift(word) {
+            return (fixed, true);
+        }
     }
 
+    let layout_decision = if config.layout.enabled {
+        layout::decide(word, &config.layout)
+    } else {
+        None
+    };
+    let source_is_known = typo::language_of_word(word)
+        .map(|language| dictionary::dictionary().score(language, word) > 0.0)
+        .unwrap_or(false);
+
+    if !source_is_known {
+        if let Some(decision) = layout_decision.as_ref() {
+            return (decision.text.clone(), true);
+        }
+    }
+
+    if config.typos.enabled && config.typos.mode != "off" {
+        if let Some(language) = typo::language_of_word(word) {
+            if let Some(suggestion) =
+                typo::suggest(word, language, config.typos.max_distance)
+            {
+                return (suggestion.text, true);
+            }
+        }
+    }
+
+    if let Some(decision) = layout_decision {
+        return (decision.text, true);
+    }
+
+    (word.to_string(), false)
+}
+
+fn preview_text(text: &str, config: &Config) -> (String, bool) {
+    let mut output = String::with_capacity(text.len());
+    let mut word = String::new();
+    let mut changed = false;
+
+    let flush = |word: &mut String, output: &mut String, changed: &mut bool| {
+        if word.is_empty() {
+            return;
+        }
+        let (replacement, word_changed) = preview_word(word, config);
+        output.push_str(&replacement);
+        *changed |= word_changed;
+        word.clear();
+    };
+
+    for ch in text.chars() {
+        if ch.is_alphabetic() {
+            word.push(ch);
+        } else {
+            flush(&mut word, &mut output, &mut changed);
+            output.push(ch);
+        }
+    }
+    flush(&mut word, &mut output, &mut changed);
+
+    (output, changed)
+}
+
+#[tauri::command]
+pub fn test_convert(state: State<'_, Arc<AppState>>, word: String) -> ConversionResult {
     let config = state.config.read();
-    match layout::decide(trimmed, &config.layout) {
-        Some(decision) => ConversionResult {
-            input: word,
-            output: decision.text,
-            changed: true,
-            confidence: decision.confidence,
-        },
-        None => ConversionResult {
-            input: word.clone(),
-            output: word,
-            changed: false,
-            confidence: 0.0,
-        },
+    let (output, changed) = preview_text(&word, &config);
+
+    ConversionResult {
+        input: word,
+        output,
+        changed,
+        confidence: if changed { 1.0 } else { 0.0 },
     }
 }
 
@@ -314,7 +364,16 @@ pub fn import_words(
 
     let mut dictionary = state.user_dict.write();
     for word in imported {
-        dictionary.add(&dictionary_id, &word, &language);
+        let word_language = if language == "auto" {
+            if word.chars().any(|ch| ('\u{0400}'..='\u{04FF}').contains(&ch)) {
+                "ru"
+            } else {
+                "en"
+            }
+        } else {
+            language.as_str()
+        };
+        dictionary.add(&dictionary_id, &word, word_language);
     }
     dictionary.save(&state.dict_path)?;
     Ok(dictionary.clone())
@@ -916,7 +975,16 @@ pub fn copy_to_clipboard(text: String) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::bundle_info;
+    use super::{bundle_info, preview_text};
+    use crate::config::Config;
+
+    #[test]
+    fn previews_layout_and_typos_in_a_phrase() {
+        let config = Config::default();
+        let (output, changed) = preview_text("ghbdtn, превет", &config);
+        assert!(changed);
+        assert_eq!(output, "привет, привет");
+    }
 
     #[test]
     fn reads_bundle_identifier_and_name() {

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -410,6 +410,23 @@ fn migrate_v2_to_v3(config: &mut Config) {
     }
 }
 
+fn migrate_v3_to_v4(config: &mut Config) {
+    let defaults = default_replacements();
+    for rule in &mut config.replacements {
+        let untouched_default = defaults.iter().any(|default| {
+            default.from == rule.from
+                && default.to == rule.to
+                && default.trigger == rule.trigger
+                && default.case_sensitive == rule.case_sensitive
+                && default.whole_word == rule.whole_word
+        });
+        if untouched_default {
+            rule.enabled = false;
+        }
+    }
+    config.schema_version = 4;
+}
+
 pub fn is_modifier_only_combo(combo: &str) -> bool {
     matches!(combo, "ShiftLeft" | "ShiftRight")
 }
@@ -453,7 +470,7 @@ pub fn default_replacements() -> Vec<Replacement> {
         from: from.into(),
         to: to.into(),
         trigger: trigger.into(),
-        enabled: true,
+        enabled: false,
         case_sensitive: false,
         whole_word: false,
         apps: Vec::new(),
@@ -491,9 +508,12 @@ impl Config {
         match fs::read_to_string(path) {
             Ok(raw) => match serde_json::from_str::<Config>(&raw) {
                 Ok(mut config) => {
-                    let migrated = config.schema_version < 3;
-                    if migrated {
+                    let migrated = config.schema_version < SCHEMA_VERSION;
+                    if config.schema_version < 3 {
                         migrate_v2_to_v3(&mut config);
+                    }
+                    if config.schema_version < 4 {
+                        migrate_v3_to_v4(&mut config);
                     }
                     config.normalize();
                     if migrated {
@@ -738,6 +758,46 @@ mod tests {
         assert_eq!(Voice::default().hotkey, "ShiftRight");
         assert!(is_modifier_only_combo("ShiftRight"));
         assert!(!is_modifier_only_combo("Command+Alt+Space"));
+    }
+
+    #[test]
+    fn defaults_for_replacements_are_disabled() {
+        assert!(default_replacements().iter().all(|rule| !rule.enabled));
+    }
+
+    #[test]
+    fn migrate_v3_to_v4_disables_only_untouched_defaults() {
+        let mut config = Config {
+            schema_version: 3,
+            replacements: default_replacements(),
+            ..Config::default()
+        };
+        for rule in &mut config.replacements {
+            rule.enabled = true;
+        }
+        config.replacements.push(Replacement {
+            from: "custom".into(),
+            to: "ok".into(),
+            trigger: "space".into(),
+            enabled: true,
+            case_sensitive: false,
+            whole_word: false,
+            apps: Vec::new(),
+        });
+
+        migrate_v3_to_v4(&mut config);
+
+        assert!(config
+            .replacements
+            .iter()
+            .filter(|rule| rule.from != "custom")
+            .all(|rule| !rule.enabled));
+        assert!(config
+            .replacements
+            .iter()
+            .find(|rule| rule.from == "custom")
+            .unwrap()
+            .enabled);
     }
 
     #[test]

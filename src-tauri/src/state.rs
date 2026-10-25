@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use parking_lot::{Mutex, RwLock};
 use rusqlite::Connection;
@@ -224,6 +224,25 @@ impl AppState {
             let _ = app.run_on_main_thread(move || {
                 platform::switch_layout(&language);
             });
+        }
+    }
+
+    pub fn switch_layout_blocking(&self, language: &str) {
+        let language = language.to_string();
+        let app = self.app.read().as_ref().cloned();
+        let Some(app) = app else {
+            return;
+        };
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        if app
+            .run_on_main_thread(move || {
+                platform::switch_layout(&language);
+                let _ = sender.send(());
+            })
+            .is_ok()
+        {
+            let _ = receiver.recv_timeout(Duration::from_millis(200));
         }
     }
 
