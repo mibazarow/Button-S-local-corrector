@@ -8,7 +8,7 @@ use tauri::{AppHandle, State};
 use tauri_plugin_autostart::ManagerExt;
 
 use crate::actions;
-use crate::config::{Config, Provider, SettingsPatch};
+use crate::config::{is_modifier_only_combo, Config, Provider, SettingsPatch};
 use crate::engine::layout;
 use crate::history::{self, HistoryEvent, HistoryStats};
 use crate::hotkeys;
@@ -751,7 +751,7 @@ pub fn set_hotkey(
     action: String,
     combo: String,
 ) -> Result<BTreeMap<String, String>, String> {
-    if !combo.is_empty() {
+    if !combo.is_empty() && !is_modifier_only_combo(&combo) {
         combo
             .parse::<tauri_plugin_global_shortcut::Shortcut>()
             .map_err(|error| format!("Некорректное сочетание: {error}"))?;

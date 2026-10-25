@@ -80,7 +80,7 @@ const ru = {
     "Нажмите {hotkey} в любом приложении и говорите — текст появится там, где стоит курсор. Сначала скачайте модель: она работает на этом Mac, аудио не уходит в интернет.",
   voiceHotkey: "Кнопка диктовки",
   voiceHotkeyHint:
-    "Сочетание можно изменить. Нажмите «Изменить» и введите новое сочетание, Escape отменяет.",
+    "По умолчанию — удерживать Right Shift. Для заглавных лучше использовать левый Shift. Нажмите «Изменить», чтобы назначить другое сочетание; Escape отменяет.",
   changeHotkey: "Изменить",
   asrModel: "Модели распознавания",
   modelsHint:
@@ -491,7 +491,7 @@ const en: Strings = {
     "Press {hotkey} in any app and speak — the text appears at the cursor. First download a model: it runs on this Mac and audio never leaves the computer.",
   voiceHotkey: "Dictation shortcut",
   voiceHotkeyHint:
-    "You can change the shortcut. Press “Change”, then type a new combination; Escape cancels.",
+    "Default is holding Right Shift. Use Left Shift for capitals. Press “Change” to assign another shortcut; Escape cancels.",
   changeHotkey: "Change",
   asrModel: "Recognition models",
   modelsHint:
@@ -835,6 +835,10 @@ export function prettyCombo(combo: string): string {
           return "⌃";
         case "Shift":
           return "⇧";
+        case "ShiftRight":
+          return "⇧ Right";
+        case "ShiftLeft":
+          return "⇧ Left";
         default:
           return part
             .replace(/^Key/, "")

@@ -22,6 +22,7 @@ pub type CGEventTapCallBack = extern "C" fn(
 ) -> CGEventRef;
 
 pub const KCG_EVENT_KEY_DOWN: u32 = 10;
+pub const KCG_EVENT_FLAGS_CHANGED: u32 = 12;
 pub const KCG_EVENT_TAP_DISABLED_BY_TIMEOUT: u32 = 0xFFFF_FFFE;
 pub const KCG_EVENT_TAP_DISABLED_BY_USER_INPUT: u32 = 0xFFFF_FFFF;
 
@@ -34,6 +35,7 @@ pub const KCG_KEYBOARD_EVENT_AUTOREPEAT: u32 = 8;
 pub const KCG_KEYBOARD_EVENT_KEYCODE: u32 = 9;
 pub const KCG_EVENT_SOURCE_USER_DATA: u32 = 42;
 
+pub const KCG_EVENT_FLAG_MASK_SHIFT: u64 = 1 << 17;
 pub const KCG_EVENT_FLAG_MASK_CONTROL: u64 = 1 << 18;
 pub const KCG_EVENT_FLAG_MASK_ALTERNATE: u64 = 1 << 19;
 pub const KCG_EVENT_FLAG_MASK_COMMAND: u64 = 1 << 20;

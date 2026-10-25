@@ -114,6 +114,10 @@ impl AppState {
         *self.app.write() = Some(app);
     }
 
+    pub fn app_handle(&self) -> Option<AppHandle> {
+        self.app.read().clone()
+    }
+
     pub fn emit_state(&self) {
         if let Some(app) = self.app.read().as_ref() {
             let _ = app.emit("state-changed", ());

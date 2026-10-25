@@ -120,7 +120,13 @@
       recordingHotkey = false;
       return;
     }
-    if (["Meta", "Alt", "Shift", "Control"].includes(event.key)) return;
+    if (["Meta", "Alt", "Shift", "Control"].includes(event.key)) {
+      if (event.code === "ShiftRight" || event.code === "ShiftLeft") {
+        recordingHotkey = false;
+        saveHotkey(event.code);
+      }
+      return;
+    }
 
     const parts: string[] = [];
     if (event.metaKey) parts.push("Command");

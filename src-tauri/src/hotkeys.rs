@@ -7,6 +7,7 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 
 use crate::actions::{self, CaseMode};
+use crate::config::is_modifier_only_combo;
 use crate::engine;
 use crate::state::AppState;
 use crate::tray;
@@ -26,7 +27,7 @@ pub fn register(app: &AppHandle, state: &AppState) {
 
     let mut seen = Vec::new();
     for combo in combos {
-        if combo.is_empty() || seen.contains(&combo) {
+        if combo.is_empty() || is_modifier_only_combo(&combo) || seen.contains(&combo) {
             continue;
         }
         seen.push(combo.clone());
@@ -44,7 +45,7 @@ pub fn register(app: &AppHandle, state: &AppState) {
     };
 
     for combo in prompt_hotkeys {
-        if seen.contains(&combo) {
+        if is_modifier_only_combo(&combo) || seen.contains(&combo) {
             continue;
         }
         seen.push(combo.clone());

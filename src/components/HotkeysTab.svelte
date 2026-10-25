@@ -30,7 +30,7 @@
     convertLastWord: "Command+Alt+KeyZ",
     convertSelection: "Command+Alt+KeyL",
     undoFix: "Command+Alt+Backspace",
-    dictate: "Command+Alt+Space",
+    dictate: "ShiftRight",
     translateRuEn: "Command+Alt+KeyT",
     translateEnRu: "Command+Alt+Shift+KeyT",
     caseUpper: "Command+Alt+KeyU",
@@ -60,6 +60,15 @@
     if (!recording) return;
     event.preventDefault();
     if (event.key === "Escape") {
+      recording = "";
+      return;
+    }
+    if (
+      recording === "dictate" &&
+      event.key === "Shift" &&
+      (event.code === "ShiftRight" || event.code === "ShiftLeft")
+    ) {
+      save(recording, event.code);
       recording = "";
       return;
     }

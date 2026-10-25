@@ -14,7 +14,8 @@ use crate::state::AppState;
 use super::ffi::*;
 use super::permissions;
 
-const EVENT_MASK: u64 = 1u64 << KCG_EVENT_KEY_DOWN;
+const EVENT_MASK: u64 =
+    (1u64 << KCG_EVENT_KEY_DOWN) | (1u64 << KCG_EVENT_FLAGS_CHANGED);
 
 struct HookCtx {
     tap: AtomicPtr<c_void>,
@@ -57,21 +58,48 @@ extern "C" fn callback(
             return event;
         }
 
-        if event_type != KCG_EVENT_KEY_DOWN {
+        if event_type != KCG_EVENT_KEY_DOWN && event_type != KCG_EVENT_FLAGS_CHANGED {
             return event;
         }
         if CGEventGetIntegerValueField(event, KCG_EVENT_SOURCE_USER_DATA) == MAGIC_MARKER {
             return event;
         }
+
+        if permissions::secure_input() {
+            if event_type == KCG_EVENT_KEY_DOWN {
+                ctx.push(KeyEvent::Reset);
+            }
+            return event;
+        }
+
+        if event_type == KCG_EVENT_FLAGS_CHANGED {
+            let key_code =
+                CGEventGetIntegerValueField(event, KCG_KEYBOARD_EVENT_KEYCODE) as u16;
+            let expected = match key_code {
+                56 => "ShiftLeft",
+                60 => "ShiftRight",
+                _ => return event,
+            };
+            let combo = ctx
+                .state
+                .config
+                .read()
+                .hotkeys
+                .get("dictate")
+                .cloned()
+                .unwrap_or_default();
+            if combo == expected {
+                let down = CGEventGetFlags(event) & KCG_EVENT_FLAG_MASK_SHIFT != 0;
+                let _ = ctx.sender.send(KeyEvent::Dictate(down));
+            }
+            return event;
+        }
+
         if CGEventGetIntegerValueField(event, KCG_KEYBOARD_EVENT_AUTOREPEAT) != 0 {
             return event;
         }
 
         let flags = CGEventGetFlags(event);
-        if permissions::secure_input() {
-            ctx.push(KeyEvent::Reset);
-            return event;
-        }
 
         if flags
             & (KCG_EVENT_FLAG_MASK_COMMAND

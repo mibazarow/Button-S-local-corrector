@@ -34,6 +34,7 @@ pub enum KeyEvent {
     Boundary(char),
     Reset,
     Shortcut,
+    Dictate(bool),
 }
 
 #[cfg(target_os = "macos")]

@@ -51,6 +51,11 @@ pub fn start(state: Arc<AppState>) {
                 KeyEvent::Shortcut => {
                     buffer.clear();
                 }
+                KeyEvent::Dictate(pressed) => {
+                    if let Some(app) = state.app_handle() {
+                        crate::voice::handle_hotkey(&app, &state, pressed);
+                    }
+                }
             }
         }
     });

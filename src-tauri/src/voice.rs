@@ -203,12 +203,27 @@ fn sender(app: &AppHandle, state: &Arc<AppState>) -> &'static Sender<Command> {
 }
 
 pub fn handle_hotkey(app: &AppHandle, state: &Arc<AppState>, pressed: bool) {
-    let (enabled, mode) = {
+    let (enabled, mode, combo) = {
         let config = state.config.read();
-        (config.voice.enabled, config.voice.mode.clone())
+        (
+            config.voice.enabled,
+            config.voice.mode.clone(),
+            config.hotkeys.get("dictate").cloned().unwrap_or_default(),
+        )
     };
     if !enabled || state.paused.load(Ordering::Relaxed) {
         return;
+    }
+
+    if platform::frontmost_bundle_id().as_deref() == Some("com.button.s") {
+        return;
+    }
+
+    if crate::config::is_modifier_only_combo(&combo) {
+        let permissions = platform::permissions();
+        if !permissions.microphone || !model_status(state).exists {
+            return;
+        }
     }
 
     let tx = sender(app, state);
@@ -242,6 +257,7 @@ struct Recording {
     started: Instant,
     sample_rate: u32,
     last_voice: Instant,
+    hud_shown: bool,
 }
 
 fn worker(app: AppHandle, state: Arc<AppState>, receiver: mpsc::Receiver<Command>) {
@@ -253,7 +269,7 @@ fn worker(app: AppHandle, state: Arc<AppState>, receiver: mpsc::Receiver<Command
         match message {
             Ok(Command::Start) => {
                 if recording.is_none() {
-                    match start_recording(&app, &state) {
+                    match start_recording(&state) {
                         Ok(active) => recording = Some(active),
                         Err(error) => notify_error(&state, &error),
                     }
@@ -278,7 +294,7 @@ fn worker(app: AppHandle, state: Arc<AppState>, receiver: mpsc::Receiver<Command
                 if let Some(active) = recording.take() {
                     finish_recording(&app, &state, active, &mut context);
                 } else {
-                    match start_recording(&app, &state) {
+                    match start_recording(&state) {
                         Ok(active) => recording = Some(active),
                         Err(error) => notify_error(&state, &error),
                     }
@@ -301,11 +317,19 @@ fn worker(app: AppHandle, state: Arc<AppState>, receiver: mpsc::Receiver<Command
                         active.last_voice = Instant::now();
                     }
 
-                    let _ = app.emit_to(
-                        "hud",
-                        "voice-state",
-                        json!({ "state": "recording", "level": level }),
-                    );
+                    if !active.hud_shown && active.started.elapsed().as_millis() >= 250 {
+                        show_hud(&app, &state);
+                        state.emit_event("voice-state", json!({ "state": "recording" }));
+                        active.hud_shown = true;
+                    }
+
+                    if active.hud_shown {
+                        let _ = app.emit_to(
+                            "hud",
+                            "voice-state",
+                            json!({ "state": "recording", "level": level }),
+                        );
+                    }
 
                     let silent_for = active.last_voice.elapsed().as_millis() as u64;
                     let too_long = active.started.elapsed().as_secs() >= max_duration;
@@ -322,7 +346,7 @@ fn worker(app: AppHandle, state: Arc<AppState>, receiver: mpsc::Receiver<Command
     }
 }
 
-fn start_recording(app: &AppHandle, state: &Arc<AppState>) -> Result<Recording, String> {
+fn start_recording(state: &Arc<AppState>) -> Result<Recording, String> {
     if platform::secure_input() {
         return Err("Защищённое поле: диктовка отключена".into());
     }
@@ -384,9 +408,6 @@ fn start_recording(app: &AppHandle, state: &Arc<AppState>) -> Result<Recording, 
         .play()
         .map_err(|error| format!("Не удалось начать запись: {error}"))?;
 
-    show_hud(app, state);
-    state.emit_event("voice-state", json!({ "state": "recording" }));
-
     Ok(Recording {
         stream,
         samples,
@@ -394,6 +415,7 @@ fn start_recording(app: &AppHandle, state: &Arc<AppState>) -> Result<Recording, 
         started: Instant::now(),
         sample_rate,
         last_voice: Instant::now(),
+        hud_shown: false,
     })
 }
 
@@ -512,10 +534,7 @@ fn finish_recording(
     let seconds = active.started.elapsed().as_secs_f32();
     if seconds < 0.35 || samples.is_empty() {
         hide_hud(app);
-        state.emit_event(
-            "toast",
-            json!({ "kind": "info", "text": "Слишком короткая запись" }),
-        );
+        state.emit_event("voice-state", json!({ "state": "idle" }));
         return;
     }
 

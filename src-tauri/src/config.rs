@@ -294,7 +294,7 @@ impl Default for Voice {
         Self {
             enabled: true,
             mode: "push-to-talk".into(),
-            hotkey: "Command+Alt+Space".into(),
+            hotkey: "ShiftRight".into(),
             device: "default".into(),
             language: "ru".into(),
             engine: "whisper".into(),
@@ -410,11 +410,16 @@ fn migrate_v2_to_v3(config: &mut Config) {
     }
 }
 
-pub fn default_hotkeys() -> BTreeMap<String, String> {    [
+pub fn is_modifier_only_combo(combo: &str) -> bool {
+    matches!(combo, "ShiftLeft" | "ShiftRight")
+}
+
+pub fn default_hotkeys() -> BTreeMap<String, String> {
+    [
         ("convertLastWord", "Command+Alt+KeyZ"),
         ("convertSelection", "Command+Alt+KeyL"),
         ("undoFix", "Command+Alt+Backspace"),
-        ("dictate", "Command+Alt+Space"),
+        ("dictate", "ShiftRight"),
         ("translateRuEn", "Command+Alt+KeyT"),
         ("translateEnRu", "Command+Alt+Shift+KeyT"),
         ("caseUpper", "Command+Alt+KeyU"),
@@ -548,6 +553,20 @@ impl Config {
         }
         for (key, value) in default_hotkeys() {
             self.hotkeys.entry(key).or_insert(value);
+        }
+        if self
+            .hotkeys
+            .get("dictate")
+            .is_some_and(|value| value == "Command+Alt+Space")
+        {
+            self.hotkeys.insert("dictate".into(), "ShiftRight".into());
+        }
+        if self.voice.hotkey.is_empty() || self.voice.hotkey == "Command+Alt+Space" {
+            self.voice.hotkey = self
+                .hotkeys
+                .get("dictate")
+                .cloned()
+                .unwrap_or_else(|| "ShiftRight".into());
         }
         if self.replacements.is_empty() {
             self.replacements = default_replacements();
@@ -711,5 +730,25 @@ mod tests {
         config.llm.default_provider = "ghost".into();
         config.normalize();
         assert_eq!(config.llm.default_provider, "");
+    }
+
+    #[test]
+    fn default_dictation_is_right_shift() {
+        assert_eq!(default_hotkeys()["dictate"], "ShiftRight");
+        assert_eq!(Voice::default().hotkey, "ShiftRight");
+        assert!(is_modifier_only_combo("ShiftRight"));
+        assert!(!is_modifier_only_combo("Command+Alt+Space"));
+    }
+
+    #[test]
+    fn normalize_migrates_old_dictation_default() {
+        let mut config = Config::default();
+        config
+            .hotkeys
+            .insert("dictate".into(), "Command+Alt+Space".into());
+        config.voice.hotkey = "Command+Alt+Space".into();
+        config.normalize();
+        assert_eq!(config.hotkeys["dictate"], "ShiftRight");
+        assert_eq!(config.voice.hotkey, "ShiftRight");
     }
 }
