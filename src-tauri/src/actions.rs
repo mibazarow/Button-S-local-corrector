@@ -1,4 +1,6 @@
 use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager};
@@ -207,16 +209,37 @@ pub fn change_case(state: &AppState, mode: CaseMode) -> Result<(), String> {
 }
 
 pub fn target_text() -> Option<(String, bool)> {
-    let context = platform::ax_context(2048)?;
-    if let Some(selected) = context.selected.filter(|text| !text.trim().is_empty()) {
-        return Some((selected, true));
+    if let Some(context) = platform::ax_context(2048) {
+        if let Some(selected) = context.selected.filter(|text| !text.trim().is_empty()) {
+            return Some((selected, true));
+        }
+        if let Some((word, suffix)) = tail_word(&context.before) {
+            return Some(if suffix.trim().is_empty() {
+                (word, false)
+            } else {
+                (format!("{word}{suffix}"), false)
+            });
+        }
     }
-    let (word, suffix) = tail_word(&context.before)?;
-    if suffix.trim().is_empty() {
-        Some((word, false))
-    } else {
-        Some((format!("{word}{suffix}"), false))
+
+    clipboard_target_text()
+}
+
+fn clipboard_target_text() -> Option<(String, bool)> {
+    let mut clipboard = arboard::Clipboard::new().ok()?;
+    let before = clipboard.get_text().ok();
+    platform::copy_selection().ok()?;
+    thread::sleep(Duration::from_millis(120));
+    let after = clipboard.get_text().ok()?;
+
+    if after.trim().is_empty() || before.as_deref() == Some(after.as_str()) {
+        return None;
     }
+
+    if let Some(before) = before {
+        let _ = clipboard.set_text(before);
+    }
+    Some((after, true))
 }
 
 pub fn target_word() -> Option<String> {
@@ -278,10 +301,19 @@ pub fn show_result(app: &AppHandle, text: &str) {
     }
 }
 
+fn show_action_error(app: &AppHandle, state: &AppState, error: &str) {
+    state.diag(&format!("ai error: {error}"));
+    state.emit_event("toast", json!({ "kind": "error", "text": error }));
+    if let Some(window) = app.get_webview_window("settings") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
 pub fn spawn_prompt(app: AppHandle, state: Arc<AppState>, prompt_id: String) {
     tauri::async_runtime::spawn(async move {
         if let Err(error) = run_prompt(&app, &state, &prompt_id).await {
-            state.emit_event("toast", json!({ "kind": "error", "text": error }));
+            show_action_error(&app, &state, &error);
         }
     });
 }
@@ -301,6 +333,12 @@ pub async fn run_prompt(
 
     let (text, _) = target_text().ok_or_else(|| "Нет выделенного текста".to_string())?;
     let app_id = platform::frontmost_bundle_id().unwrap_or_default();
+    state.diag(&format!(
+        "ai prompt {} start: {} chars, app {}",
+        prompt.id,
+        text.chars().count(),
+        app_id
+    ));
     if !app_id.is_empty()
         && !state
             .config
@@ -360,7 +398,7 @@ pub async fn run_prompt(
 pub fn spawn_translate(app: AppHandle, state: Arc<AppState>, target: String) {
     tauri::async_runtime::spawn(async move {
         if let Err(error) = translate(&app, &state, &target).await {
-            state.emit_event("toast", json!({ "kind": "error", "text": error }));
+            show_action_error(&app, &state, &error);
         }
     });
 }
@@ -372,6 +410,11 @@ pub async fn translate(
 ) -> Result<(), String> {
     let (text, _) = target_text().ok_or_else(|| "Нет текста для перевода".to_string())?;
     let translate_app = platform::frontmost_bundle_id().unwrap_or_default();
+    state.diag(&format!(
+        "ai translate start: {} chars, app {}",
+        text.chars().count(),
+        translate_app
+    ));
     if !translate_app.is_empty()
         && !state
             .config

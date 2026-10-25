@@ -1,19 +1,16 @@
-//! Встроенные локальные LLM-модели (llama.cpp): каталог, скачивание,
-//! ленивая загрузка в память с выгрузкой по простою и инференс.
+//! Встроенные локальные LLM: каталог, скачивание и запуск отдельного
+//! helper-процесса `button-s-llm`. Отдельный процесс обязателен: llama.cpp и
+//! whisper.cpp несут две копии ggml, и в одном адресном пространстве их
+//! символы конфликтуют.
 
-use std::path::PathBuf;
+use std::io::{BufRead, BufReader, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
-use std::time::{Duration, Instant};
 
-use llama_cpp_2::context::params::LlamaContextParams;
-use llama_cpp_2::llama_backend::LlamaBackend;
-use llama_cpp_2::llama_batch::LlamaBatch;
-use llama_cpp_2::model::LlamaModel;
-use llama_cpp_2::model::params::LlamaModelParams;
-use llama_cpp_2::sampling::LlamaSampler;
 use parking_lot::Mutex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::{AppHandle, Emitter};
 
@@ -22,10 +19,7 @@ use crate::state::AppState;
 
 /// Имя встроенного провайдера в config.llm.providers.
 pub const LOCAL_PROVIDER: &str = "local";
-const MIN_FILE_SIZE: u64 = 100_000_000; // всё, что меньше, считаем битым
-const N_CTX: u32 = 4096;
-const MAX_TOKENS: u32 = 1024;
-const UNLOAD_AFTER: Duration = Duration::from_secs(90);
+const MIN_FILE_SIZE: u64 = 100_000_000;
 
 pub struct LocalLlmSpec {
     pub id: &'static str,
@@ -35,7 +29,6 @@ pub struct LocalLlmSpec {
 }
 
 /// Каталог локальных моделей: от лёгкой к максимальной.
-/// Vikhr — русскоязычные, остальные универсальные (RU+EN).
 pub const LOCAL_LLM_MODELS: &[LocalLlmSpec] = &[
     LocalLlmSpec {
         id: "gemma-3-270m",
@@ -86,8 +79,29 @@ pub struct LocalLlmView {
 
 static DOWNLOADING: AtomicBool = AtomicBool::new(false);
 static DIR: OnceLock<PathBuf> = OnceLock::new();
+static WORKER: OnceLock<Mutex<Option<Worker>>> = OnceLock::new();
 
-/// Директория моделей для рантайма (без доступа к AppState) — задаётся при старте.
+struct Worker {
+    child: Child,
+    stdin: ChildStdin,
+    stdout: BufReader<ChildStdout>,
+}
+
+#[derive(Serialize)]
+struct WorkerRequest {
+    model: String,
+    prompt: String,
+    temperature: f32,
+    qwen3: bool,
+}
+
+#[derive(Deserialize)]
+struct WorkerResponse {
+    ok: bool,
+    text: Option<String>,
+    error: Option<String>,
+}
+
 pub fn set_dir(dir: PathBuf) {
     let _ = DIR.set(dir.join("llm"));
 }
@@ -107,11 +121,10 @@ fn dir_from_state(state: &AppState) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("models/llm"))
 }
 
-fn file_size(path: &std::path::Path) -> u64 {
+fn file_size(path: &Path) -> u64 {
     std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0)
 }
 
-/// Каталог моделей: скачана ли, активна ли (провайдер local указывает на неё).
 pub fn list_local_models(state: &AppState) -> Vec<LocalLlmView> {
     let config = state.config.read();
     let active_model = if config.llm.default_provider == LOCAL_PROVIDER {
@@ -124,6 +137,7 @@ pub fn list_local_models(state: &AppState) -> Vec<LocalLlmView> {
     } else {
         None
     };
+
     LOCAL_LLM_MODELS
         .iter()
         .map(|spec| {
@@ -139,26 +153,26 @@ pub fn list_local_models(state: &AppState) -> Vec<LocalLlmView> {
         .collect()
 }
 
-/// Создаёт/обновляет встроенного провайдера на скачанную модель.
 pub fn ensure_local_provider(state: &AppState, id: &str) -> Result<(), String> {
     let mut config = state.config.write();
     let provider = Provider {
         kind: "local".into(),
         base_url: "local://".into(),
-        model: id.into(),
+        model: id.to_string(),
         key_ref: String::new(),
         timeout_sec: 120,
         models: Vec::new(),
     };
-    let was_empty = config.llm.providers.is_empty();
-    config.llm.providers.insert(LOCAL_PROVIDER.into(), provider);
-    if config.llm.default_provider.is_empty() || was_empty {
+    config
+        .llm
+        .providers
+        .insert(LOCAL_PROVIDER.into(), provider);
+    if config.llm.default_provider.is_empty() {
         config.llm.default_provider = LOCAL_PROVIDER.into();
     }
     config.save(&state.config_path)
 }
 
-/// Делает скачанную модель активной (провайдер + выгрузка предыдущей из памяти).
 pub fn use_local_model(state: &AppState, id: &str) -> Result<(), String> {
     let item = spec(id)?;
     if file_size(&dir_from_state(state).join(item.file)) <= MIN_FILE_SIZE {
@@ -217,34 +231,40 @@ pub async fn download_local_model(
     if DOWNLOADING.swap(true, Ordering::Relaxed) {
         return Err("Модель уже скачивается".into());
     }
+
     let result = download_inner(app, state, &id).await;
     DOWNLOADING.store(false, Ordering::Relaxed);
-    result
+    result?;
+    Ok(list_local_models(state))
 }
 
 async fn download_inner(
     app: &AppHandle,
     state: &AppState,
     id: &str,
-) -> Result<Vec<LocalLlmView>, String> {
+) -> Result<(), String> {
     use std::io::Write;
 
     let item = spec(id)?;
-    let path = dir_from_state(state).join(item.file);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let dir = dir_from_state(state);
+    std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let path = dir.join(item.file);
+
+    if file_size(&path) == item.size_bytes {
+        ensure_local_provider(state, id)?;
+        return Ok(());
     }
 
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(7200))
+        .timeout(std::time::Duration::from_secs(3600))
         .build()
         .map_err(|error| error.to_string())?;
-
     let mut response = client
         .get(item.url)
         .send()
         .await
         .map_err(|error| format!("Нет связи с сервером модели: {error}"))?;
+
     if !response.status().is_success() {
         return Err(format!("Сервер модели вернул {}", response.status()));
     }
@@ -278,70 +298,27 @@ async fn download_inner(
     }
 
     std::fs::rename(&temp, &path).map_err(|error| error.to_string())?;
-    ensure_local_provider(state, item.id)?;
-    unload();
-
-    let _ = app.emit("llm-model-download", json!({ "id": item.id, "done": true }));
-    Ok(list_local_models(state))
+    ensure_local_provider(state, id)?;
+    let _ = app.emit("llm-model-download", json!({ "id": spec(id)?.id, "done": true }));
+    Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Рантайм инференса
-// ---------------------------------------------------------------------------
-
-struct Loaded {
-    id: String,
-    model: LlamaModel,
-    last_used: Instant,
-}
-
-static LOADED: Mutex<Option<Loaded>> = Mutex::new(None);
-
-fn backend() -> Result<&'static LlamaBackend, String> {
-    static BACKEND: OnceLock<Result<LlamaBackend, String>> = OnceLock::new();
-    BACKEND
-        .get_or_init(|| LlamaBackend::init().map_err(|error| error.to_string()))
-        .as_ref()
-        .map_err(|error| error.clone())
-}
-
-/// Выгружает модель из памяти (вызывается при смене модели и чистильщиком).
+/// Выгружает helper-процесс и модель из памяти.
 pub fn unload() {
-    *LOADED.lock() = None;
+    let Some(worker) = WORKER.get() else {
+        return;
+    };
+    if let Some(mut worker) = worker.lock().take() {
+        let _ = worker.child.kill();
+        let _ = worker.child.wait();
+    }
 }
 
-fn spawn_cleaner() {
-    static CLEANER: OnceLock<()> = OnceLock::new();
-    CLEANER.get_or_init(|| {
-        std::thread::spawn(|| loop {
-            std::thread::sleep(Duration::from_secs(30));
-            let mut guard = LOADED.lock();
-            if guard
-                .as_ref()
-                .is_some_and(|loaded| loaded.last_used.elapsed() > UNLOAD_AFTER)
-            {
-                *guard = None;
-                log::info!("local llm unloaded after idle");
-            }
-        });
-    });
-}
-
-/// Генерация ответа локальной моделью. Блокирующая часть выполняется
-/// в отдельном потоке, модель грузится лениво и живёт до простоя.
-pub async fn complete(model_id: &str, prompt: &str, temperature: f32) -> Result<String, String> {
-    let model_id = model_id.to_string();
-    let prompt = prompt.to_string();
-    tauri::async_runtime::spawn_blocking(move || {
-        complete_blocking(&model_id, &prompt, temperature)
-    })
-    .await
-    .map_err(|error| format!("Ошибка локальной модели: {error}"))?
-}
-
-fn complete_blocking(model_id: &str, prompt: &str, temperature: f32) -> Result<String, String> {
-    spawn_cleaner();
-
+pub async fn complete(
+    model_id: &str,
+    prompt: &str,
+    temperature: f32,
+) -> Result<String, String> {
     let item = spec(model_id)?;
     let dir = DIR
         .get()
@@ -352,147 +329,111 @@ fn complete_blocking(model_id: &str, prompt: &str, temperature: f32) -> Result<S
         return Err("Локальная модель не скачана".into());
     }
 
-    let mut guard = LOADED.lock();
-    let needs_load = guard
-        .as_ref()
-        .map(|loaded| loaded.id != model_id)
-        .unwrap_or(true);
-    if needs_load {
-        *guard = None; // выгрузить предыдущую перед загрузкой новой
-        let backend = backend()?;
-        let params = LlamaModelParams::default().with_n_gpu_layers(u32::MAX);
-        let model = LlamaModel::load_from_file(backend, &path, &params)
-            .map_err(|error| format!("Не удалось загрузить модель: {error}"))?;
-        *guard = Some(Loaded {
-            id: model_id.to_string(),
-            model,
-            last_used: Instant::now(),
-        });
-    }
-    let loaded = guard.as_mut().expect("model just loaded");
-    loaded.last_used = Instant::now();
+    let request = WorkerRequest {
+        model: path.to_string_lossy().to_string(),
+        prompt: prompt.to_string(),
+        temperature,
+        qwen3: model_id.starts_with("qwen3"),
+    };
 
-    let text = generate(&loaded.model, prompt, temperature, model_id.starts_with("qwen3"))
-        .map(|text| strip_thinking(&text))?;
-    if text.is_empty() {
-        return Err("Локальная модель вернула пустой ответ".into());
-    }
-    Ok(text)
+    tauri::async_runtime::spawn_blocking(move || send_request(&request))
+        .await
+        .map_err(|error| format!("Ошибка локальной модели: {error}"))?
 }
 
-fn generate(
-    model: &LlamaModel,
-    prompt: &str,
-    temperature: f32,
-    is_qwen3: bool,
-) -> Result<String, String> {
-    let backend = backend()?;
-    let threads = std::thread::available_parallelism()
-        .map(|count| count.get() as i32)
-        .unwrap_or(4);
+fn send_request(request: &WorkerRequest) -> Result<String, String> {
+    let worker = WORKER.get_or_init(|| Mutex::new(None));
+    let mut guard = worker.lock();
 
-    let context_params = LlamaContextParams::default()
-        .with_n_ctx(std::num::NonZeroU32::new(N_CTX))
-        .with_n_batch(512)
-        .with_n_threads(threads);
-    let mut context = model
-        .new_context(backend, context_params)
-        .map_err(|error| format!("Не удалось создать контекст: {error}"))?;
-
-    // Шаблон чата из самой модели. Qwen3 отключаем размышления мягким
-    // переключателем `/no_think` — текстовые задачи в них не нуждаются.
-    let template = model
-        .chat_template(None)
-        .map_err(|_| "У модели нет chat-шаблона".to_string())?;
-    let system_text = if is_qwen3 {
-        format!("{} /no_think", crate::llm::SYSTEM_PROMPT)
-    } else {
-        crate::llm::SYSTEM_PROMPT.to_string()
-    };
-    let system = llama_cpp_2::model::LlamaChatMessage::new("system".into(), system_text)
-        .map_err(|error| error.to_string())?;
-    let user = llama_cpp_2::model::LlamaChatMessage::new("user".into(), prompt.to_string())
-        .map_err(|error| error.to_string())?;
-    let templated = model
-        .apply_chat_template(&template, &[system, user], true)
-        .map_err(|error| format!("Ошибка шаблона: {error}"))?;
-
-    let vocab = model.vocab();
-    let tokens = vocab.tokenize(templated.as_bytes(), false, true);
-    if tokens.is_empty() {
-        return Err("Пустой промпт".into());
+    if guard.is_none() {
+        *guard = Some(spawn_worker()?);
     }
 
-    let mut batch = LlamaBatch::new(tokens.len() + MAX_TOKENS as usize, 1);
-    for (position, token) in tokens.iter().enumerate() {
-        let is_last = position == tokens.len() - 1;
-        batch
-            .add(*token, position as i32, &[0], is_last)
-            .map_err(|error| format!("Ошибка батча: {error}"))?;
+    let result = roundtrip(guard.as_mut().expect("worker just started"), request);
+    if result.is_err() {
+        *guard = None;
     }
-    context
-        .decode(&mut batch)
-        .map_err(|error| format!("Ошибка инференса: {error}"))?;
-    batch.clear();
-
-    let sampler = if temperature > 0.01 {
-        LlamaSampler::chain_simple([
-            LlamaSampler::dist(299_792_458),
-            LlamaSampler::top_k(40),
-            LlamaSampler::top_p(0.9, 1),
-            LlamaSampler::temp(temperature),
-            LlamaSampler::greedy(),
-        ])
-    } else {
-        LlamaSampler::chain_simple([LlamaSampler::greedy()])
-    };
-    let mut sampler = sampler;
-
-    let mut output = Vec::new();
-    for position in (tokens.len() as i32..).take(MAX_TOKENS as usize) {
-        let token = sampler.sample(&context, -1);
-        if vocab.is_eog(token) {
-            break;
-        }
-        output.extend_from_slice(&vocab.detokenize(&[token], true, true));
-        batch
-            .add(token, position, &[0], true)
-            .map_err(|error| format!("Ошибка батча: {error}"))?;
-        if context.decode(&mut batch).is_err() {
-            break;
-        }
-        batch.clear();
-    }
-
-    let text = String::from_utf8_lossy(&output).trim().to_string();
-    if text.is_empty() {
-        return Err("Локальная модель вернула пустой ответ".into());
-    }
-    Ok(text)
+    result
 }
 
-/// Qwen3 «думает» блоками <think>…</think> — оставляем только ответ.
-/// Незакрытый блок размышлений означает, что ответа не было.
-fn strip_thinking(text: &str) -> String {
-    if let Some(index) = text.find("</think>") {
-        return text[index + "</think>".len()..].trim().to_string();
+fn roundtrip(worker: &mut Worker, request: &WorkerRequest) -> Result<String, String> {
+    let line = serde_json::to_string(request).map_err(|error| error.to_string())?;
+    writeln!(worker.stdin, "{line}").map_err(|error| error.to_string())?;
+    worker.stdin.flush().map_err(|error| error.to_string())?;
+
+    let mut response = String::new();
+    let read = worker
+        .stdout
+        .read_line(&mut response)
+        .map_err(|error| error.to_string())?;
+    if read == 0 {
+        return Err("Локальный движок завершился".into());
     }
-    if text.contains("<think>") {
-        return String::new();
+
+    let response: WorkerResponse =
+        serde_json::from_str(&response).map_err(|error| error.to_string())?;
+    if response.ok {
+        response
+            .text
+            .filter(|text| !text.trim().is_empty())
+            .ok_or_else(|| "Локальная модель вернула пустой ответ".into())
+    } else {
+        Err(response
+            .error
+            .unwrap_or_else(|| "Ошибка локальной модели".into()))
     }
-    text.trim().to_string()
+}
+
+fn spawn_worker() -> Result<Worker, String> {
+    let path = worker_path()?;
+    let mut child = Command::new(&path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| format!("Не удалось запустить локальный движок: {error}"))?;
+
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or("Нет stdin локального движка")?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or("Нет stdout локального движка")?;
+
+    Ok(Worker {
+        child,
+        stdin,
+        stdout: BufReader::new(stdout),
+    })
+}
+
+fn worker_path() -> Result<PathBuf, String> {
+    let mut candidates = Vec::new();
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("button-s-llm"));
+            if let Some(parent) = dir.parent() {
+                candidates.push(parent.join("button-s-llm"));
+            }
+        }
+    }
+
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    candidates.push(manifest.join("target/release/button-s-llm"));
+    candidates.push(manifest.join("target/debug/button-s-llm"));
+
+    candidates
+        .into_iter()
+        .find(|candidate| candidate.exists())
+        .ok_or_else(|| "Локальный движок button-s-llm не найден".into())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn strips_qwen_thinking_blocks() {
-        assert_eq!(strip_thinking("<think>ладно</think>Ответ"), "Ответ");
-        assert_eq!(strip_thinking("Просто ответ"), "Просто ответ");
-        assert_eq!(strip_thinking("<think>думает"), "");
-    }
 
     #[test]
     fn catalog_is_sorted_by_size() {

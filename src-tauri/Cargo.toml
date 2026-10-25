@@ -1,3 +1,6 @@
+[workspace]
+members = ["llm-worker"]
+
 [package]
 name = "button-s"
 version = "1.0.0"
@@ -30,7 +33,6 @@ cpal = "0.18"
 hound = "3.5"
 whisper-rs = "0.16"
 tauri-plugin-single-instance = "2"
-llama-cpp-2 = "0.1.160"
 plist = "1"
 
 [target.'cfg(target_os = "macos")'.dependencies]

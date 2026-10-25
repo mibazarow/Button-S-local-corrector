@@ -77,6 +77,7 @@ extern "C" {
     ) -> CGEventRef;
     pub fn CGEventKeyboardSetUnicodeString(event: CGEventRef, len: usize, buffer: *const u16);
     pub fn CGEventSetIntegerValueField(event: CGEventRef, field: u32, value: i64);
+    pub fn CGEventSetFlags(event: CGEventRef, flags: u64);
     pub fn CGEventPost(tap: u32, event: CGEventRef);
     pub fn CGPreflightListenEventAccess() -> bool;
     pub fn CGRequestListenEventAccess() -> bool;

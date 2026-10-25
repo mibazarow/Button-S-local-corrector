@@ -51,6 +51,29 @@ pub fn insert(text: &str) -> Result<(), String> {
     type_text(text)
 }
 
+pub fn copy_selection() -> Result<(), String> {
+    if !permissions::accessibility() {
+        return Err("Нет разрешения «Универсальный доступ»".into());
+    }
+
+    const C_KEY: u16 = 8;
+    unsafe {
+        let down = CGEventCreateKeyboardEvent(ptr::null_mut(), C_KEY, true);
+        if down.is_null() {
+            return Err("Не удалось создать Cmd+C".into());
+        }
+        CGEventSetFlags(down, KCG_EVENT_FLAG_MASK_COMMAND);
+        post_key(down);
+
+        let up = CGEventCreateKeyboardEvent(ptr::null_mut(), C_KEY, false);
+        if !up.is_null() {
+            CGEventSetFlags(up, KCG_EVENT_FLAG_MASK_COMMAND);
+        }
+        post_key(up);
+    }
+    Ok(())
+}
+
 pub fn delete_chars(count: usize) -> Result<(), String> {
     if !permissions::accessibility() {
         return Err("Нет разрешения «Универсальный доступ»".into());

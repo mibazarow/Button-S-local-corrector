@@ -158,6 +158,7 @@ pub fn run() {
 
             let state = Arc::new(AppState::new(config, config_path));
             state.attach_app(handle.clone());
+            state.diag("app started");
             llm_local::set_dir(
                 app.path()
                     .app_config_dir()?

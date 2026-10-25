@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "build:llm-worker": "node scripts/build-llm-worker.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.4",

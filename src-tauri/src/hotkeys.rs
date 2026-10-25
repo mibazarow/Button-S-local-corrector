@@ -31,7 +31,7 @@ pub fn register(app: &AppHandle, state: &AppState) {
             continue;
         }
         seen.push(combo.clone());
-        register_one(app, &combo);
+        register_one(app, state, &combo);
     }
 
     let prompt_hotkeys = {
@@ -49,18 +49,23 @@ pub fn register(app: &AppHandle, state: &AppState) {
             continue;
         }
         seen.push(combo.clone());
-        register_one(app, &combo);
+        register_one(app, state, &combo);
     }
 }
 
-fn register_one(app: &AppHandle, combo: &str) {
+fn register_one(app: &AppHandle, state: &AppState, combo: &str) {
     match Shortcut::from_str(combo) {
-        Ok(shortcut) => {
-            if let Err(error) = app.global_shortcut().register(shortcut) {
+        Ok(shortcut) => match app.global_shortcut().register(shortcut) {
+            Ok(()) => state.diag(&format!("hotkey registered: {combo}")),
+            Err(error) => {
+                state.diag(&format!("hotkey register failed: {combo}: {error}"));
                 log::warn!("cannot register shortcut {combo}: {error}");
             }
+        },
+        Err(error) => {
+            state.diag(&format!("hotkey invalid: {combo}: {error}"));
+            log::warn!("invalid shortcut {combo}: {error}");
         }
-        Err(error) => log::warn!("invalid shortcut {combo}: {error}"),
     }
 }
 
@@ -78,6 +83,7 @@ pub fn dispatch(app: &AppHandle, shortcut: &Shortcut, pressed: bool) {
     };
 
     if let Some(action) = action {
+        state.diag(&format!("hotkey pressed: {action} ({shortcut:?})"));
         run_action(app, &state, &action, pressed);
         return;
     }
@@ -97,6 +103,7 @@ pub fn dispatch(app: &AppHandle, shortcut: &Shortcut, pressed: bool) {
     };
 
     if let Some(prompt_id) = prompt {
+        state.diag(&format!("prompt hotkey pressed: {prompt_id}"));
         if pressed {
             actions::spawn_prompt(app.clone(), Arc::clone(&state), prompt_id);
         }

@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run build && node scripts/build-llm-worker.mjs",
     "frontendDist": "../dist"
   },
   "app": {
@@ -36,6 +36,9 @@
     "targets": [
       "app",
       "dmg"
+    ],
+    "externalBin": [
+      "binaries/button-s-llm"
     ],
     "category": "Productivity",
     "shortDescription": "Keyboard layout correction, typo fix and voice input",

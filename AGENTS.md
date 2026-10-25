@@ -146,8 +146,14 @@ cargo build --manifest-path src-tauri/Cargo.toml     # debug-бинарник
 
 ## 8. Дорогие и рискованные операции
 
-- `cargo clean`, удаление `target/`, пересборка `llama-cpp-2` — долго; только
-  при реальной необходимости.
+- Локальная LLM **обязательно** живёт в отдельном helper-процессе
+  (`src-tauri/llm-worker`, бинарь `button-s-llm`): llama.cpp и whisper.cpp несут
+  разные копии ggml, в одном процессе их символы конфликтуют и дают
+  `GGML_ASSERT`/SIGABRT. Не переносить llama обратно в основной крейт.
+- `npx tauri build` собирает helper через `beforeBuildCommand`; не удалять
+  `src-tauri/llm-worker` и `scripts/build-llm-worker.mjs`.
+- `cargo clean`, удаление `target/`, пересборка `llama-cpp-2`/`whisper-rs` —
+  долго; только при реальной необходимости.
 - Скачивание моделей (Whisper 78 МБ–1.6 ГБ, LLM 250 МБ–2.5 ГБ) — только по
   действию пользователя; в репозиторий не добавлять.
 - Не запускать несколько субагентов-писателей одновременно над одними файлами.

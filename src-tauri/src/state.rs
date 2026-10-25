@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -116,6 +117,24 @@ impl AppState {
 
     pub fn app_handle(&self) -> Option<AppHandle> {
         self.app.read().clone()
+    }
+
+    pub fn diag(&self, message: &str) {
+        let Some(dir) = self.config_path.parent() else {
+            return;
+        };
+        let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join("diagnostics.log"))
+        else {
+            return;
+        };
+        let millis = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis())
+            .unwrap_or(0);
+        let _ = writeln!(file, "{millis} {message}");
     }
 
     pub fn emit_state(&self) {

@@ -478,7 +478,6 @@ dependencies = [
  "env_logger",
  "hound",
  "keyring",
- "llama-cpp-2",
  "log",
  "objc2",
  "objc2-app-kit",
@@ -497,6 +496,16 @@ dependencies = [
  "tauri-plugin-global-shortcut",
  "tauri-plugin-single-instance",
  "whisper-rs",
+]
+
+[[package]]
+name = "button-s-llm-worker"
+version = "0.1.0"
+dependencies = [
+ "llama-cpp-2",
+ "llama-cpp-sys-2",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
