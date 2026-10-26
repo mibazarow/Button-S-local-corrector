@@ -432,19 +432,24 @@ pub fn is_modifier_only_combo(combo: &str) -> bool {
 }
 
 pub fn default_hotkeys() -> BTreeMap<String, String> {
+    let command = if cfg!(target_os = "macos") {
+        "Command"
+    } else {
+        "Control"
+    };
     [
-        ("convertLastWord", "Command+Alt+KeyZ"),
-        ("convertSelection", "Command+Alt+KeyL"),
-        ("undoFix", "Command+Alt+Backspace"),
-        ("dictate", "ShiftRight"),
-        ("translateRuEn", "Command+Alt+KeyT"),
-        ("translateEnRu", "Command+Alt+Shift+KeyT"),
-        ("pauseAll", "Command+Alt+KeyP"),
-        ("llmFix", "Command+Alt+KeyF"),
-        ("selectionMenu", "Control+KeyM"),
+        ("convertLastWord", format!("{command}+Alt+KeyZ")),
+        ("convertSelection", format!("{command}+Alt+KeyL")),
+        ("undoFix", format!("{command}+Alt+Backspace")),
+        ("dictate", "ShiftRight".into()),
+        ("translateRuEn", format!("{command}+Alt+KeyT")),
+        ("translateEnRu", format!("{command}+Alt+Shift+KeyT")),
+        ("pauseAll", format!("{command}+Alt+KeyP")),
+        ("llmFix", format!("{command}+Alt+KeyF")),
+        ("selectionMenu", "Control+KeyM".into()),
     ]
     .into_iter()
-    .map(|(key, value)| (key.to_string(), value.to_string()))
+    .map(|(key, value)| (key.to_string(), value))
     .collect()
 }
 
@@ -776,6 +781,15 @@ mod tests {
     fn default_dictation_is_right_shift() {
         assert_eq!(default_hotkeys()["dictate"], "ShiftRight");
         assert_eq!(default_hotkeys()["selectionMenu"], "Control+KeyM");
+        let command = if cfg!(target_os = "macos") {
+            "Command"
+        } else {
+            "Control"
+        };
+        assert_eq!(
+            default_hotkeys()["convertLastWord"],
+            format!("{command}+Alt+KeyZ")
+        );
         assert_eq!(Voice::default().hotkey, "ShiftRight");
         assert!(is_modifier_only_combo("ShiftRight"));
         assert!(!is_modifier_only_combo("Command+Alt+Space"));

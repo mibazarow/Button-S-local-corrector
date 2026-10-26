@@ -23,16 +23,17 @@
     { key: "selectionMenu", label: t.actionSelectionMenu },
   ]);
 
+  const command = navigator.userAgent.includes("Mac") ? "Command" : "Control";
   const defaults: Record<string, string> = {
-    convertLastWord: "Command+Alt+KeyZ",
-    convertSelection: "Command+Alt+KeyL",
-    undoFix: "Command+Alt+Backspace",
+    convertLastWord: `${command}+Alt+KeyZ`,
+    convertSelection: `${command}+Alt+KeyL`,
+    undoFix: `${command}+Alt+Backspace`,
     dictate: "ShiftRight",
-    translateRuEn: "Command+Alt+KeyT",
-    translateEnRu: "Command+Alt+Shift+KeyT",
-    pauseAll: "Command+Alt+KeyP",
+    translateRuEn: `${command}+Alt+KeyT`,
+    translateEnRu: `${command}+Alt+Shift+KeyT`,
+    pauseAll: `${command}+Alt+KeyP`,
     selectionMenu: "Control+KeyM",
-    llmFix: "Command+Alt+KeyF",
+    llmFix: `${command}+Alt+KeyF`,
   };
 
   let recording = $state("");
