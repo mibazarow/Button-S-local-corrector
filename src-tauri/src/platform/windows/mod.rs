@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use windows::Win32::Foundation::{LPARAM, POINT, WPARAM};
 use windows::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
@@ -203,8 +201,4 @@ pub(crate) fn window_title(hwnd: windows::Win32::Foundation::HWND) -> String {
 
 pub(crate) fn is_visible(hwnd: windows::Win32::Foundation::HWND) -> bool {
     unsafe { IsWindowVisible(hwnd).as_bool() }
-}
-
-pub(crate) fn start_hook(sender: std::sync::mpsc::Sender<super::KeyEvent>, state: Arc<AppState>) {
-    start(sender, state);
 }
