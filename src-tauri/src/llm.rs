@@ -151,6 +151,12 @@ impl PromptStore {
                     existing.template = builtin.template;
                     existing.description = builtin.description;
                     existing.output = builtin.output;
+                    if cfg!(not(target_os = "macos"))
+                        && existing.hotkey.starts_with("Command+")
+                    {
+                        existing.hotkey =
+                            existing.hotkey.replacen("Command", "Control", 1);
+                    }
                 }
                 None => store.prompts.push(builtin),
             }
@@ -195,13 +201,18 @@ impl PromptStore {
 }
 
 pub fn builtin_prompts() -> Vec<Prompt> {
+    let command = if cfg!(target_os = "macos") {
+        "Command"
+    } else {
+        "Control"
+    };
     [
         (
             "fix-grammar",
             "Исправить грамматику",
             "Fix grammar",
             "Fix spelling, grammar, punctuation, and typos. Return only the corrected text without explanations.\n\n{{text}}",
-            "Command+Alt+KeyF",
+            "",
             "replace",
         ),
         (
@@ -245,7 +256,11 @@ pub fn builtin_prompts() -> Vec<Prompt> {
                 description: description.into(),
                 template: template.into(),
                 note: String::new(),
-                hotkey: hotkey.into(),
+                hotkey: if id == "fix-grammar" {
+                    format!("{command}+Alt+KeyF")
+                } else {
+                    hotkey.into()
+                },
                 provider: String::new(),
                 model: String::new(),
                 temperature: 0.2,
