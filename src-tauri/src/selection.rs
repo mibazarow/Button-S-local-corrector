@@ -499,7 +499,8 @@ fn clamp_menu_position(
     )
 }
 
-pub fn focus(app: &AppHandle) {
+pub fn focus(app: &AppHandle, state: &AppState) {
+    state.selection_input_focused.store(true, Ordering::SeqCst);
     if let Some(window) = app.get_webview_window("selection") {
         let _ = window.set_focusable(true);
         let _ = window.set_focus();
@@ -515,6 +516,7 @@ pub fn hide_menu(app: &AppHandle, state: &AppState) {
     state.selection_pointer_inside.store(false, Ordering::SeqCst);
     state.selection_menu_open.store(false, Ordering::SeqCst);
     state.selection_visible.store(false, Ordering::SeqCst);
+    state.selection_input_focused.store(false, Ordering::SeqCst);
     *state.selection_menu_since.lock() = None;
 
     if let Some(window) = app.get_webview_window("selection") {
@@ -587,36 +589,128 @@ fn instruction(action: &str, custom: &str, text: &str) -> Option<String> {
     Some(format!("{base}\n{directive}"))
 }
 
+fn capture_selection(state: &AppState) -> Result<SelectionCapture, String> {
+    let guard = state.selection.lock();
+    let capture = guard
+        .as_ref()
+        .ok_or_else(|| "Нет выделенного текста".to_string())?;
+    if capture.text.trim().is_empty() {
+        return Err("Нет выделенного текста".into());
+    }
+    if capture.at.elapsed() > Duration::from_secs(120) {
+        return Err("Выделение устарело — выделите текст заново".into());
+    }
+    if !state
+        .config
+        .read()
+        .app_feature_enabled(&capture.bundle_id, Feature::Llm)
+    {
+        return Err("ИИ выключен для этого приложения".into());
+    }
+    Ok(SelectionCapture {
+        text: capture.text.clone(),
+        bundle_id: capture.bundle_id.clone(),
+        at: capture.at,
+    })
+}
+
+fn activate_capture(app: &AppHandle, state: &AppState, capture: &SelectionCapture) -> Result<(), String> {
+    let _ = platform::activate_app(&capture.bundle_id);
+    let deadline = Instant::now() + ACTIVATION_TIMEOUT;
+    let mut activated = false;
+    while Instant::now() < deadline {
+        if platform::frontmost_app_info()
+            .map(|info| info.bundle_id == capture.bundle_id)
+            .unwrap_or(false)
+        {
+            activated = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    if !activated {
+        state.diag(&format!(
+            "selection activation timeout for {}: paste skipped",
+            capture.bundle_id
+        ));
+        let error = "Не удалось вернуться в приложение — текст не вставлен".to_string();
+        actions::show_action_error(app, state, &error);
+        return Err(error);
+    }
+    thread::sleep(ACTIVATION_SETTLE);
+    Ok(())
+}
+
+pub async fn run_prompt_selection(
+    app: &AppHandle,
+    state: &AppState,
+    prompt_id: &str,
+) -> Result<(), String> {
+    let prompt = {
+        let store = state.prompts.read();
+        store
+            .get(prompt_id)
+            .cloned()
+            .ok_or_else(|| "Действие не найдено".to_string())?
+    };
+    let capture = capture_selection(state)?;
+    let provider = {
+        let config = state.config.read();
+        llm::resolve_prompt(&prompt, &config.llm)?.clone()
+    };
+    let language = platform::language_for_text(&capture.text).unwrap_or("ru");
+    let filled = llm::fill_template(&prompt.template, &capture.text, language, &capture.bundle_id);
+    let filled = llm::with_note(&filled, &prompt.note);
+    let filled = format!("{filled}\n\n{}", llm::language_rule(&capture.text));
+
+    state.diag(&format!(
+        "selection prompt {}: {} chars, app {}",
+        prompt.id,
+        capture.text.chars().count(),
+        capture.bundle_id
+    ));
+    state.emit_event(
+        "action-state",
+        serde_json::json!({ "state": "loading", "kind": "llm" }),
+    );
+    let result = llm::complete(&provider, &filled, &prompt.model, prompt.temperature).await;
+    state.emit_event(
+        "action-state",
+        serde_json::json!({ "state": "idle", "kind": "llm" }),
+    );
+    let result = result.inspect_err(|error| actions::show_action_error(app, state, error))?;
+    let result = llm::clean_output(&result);
+    if result.is_empty() {
+        return Err("Провайдер вернул пустой ответ".into());
+    }
+
+    dismiss(app, state);
+    match prompt.output.as_str() {
+        "popup" => actions::show_result(app, &result),
+        "copy" => actions::deliver_output(app, state, "copy", &result)?,
+        _ => {
+            activate_capture(app, state, &capture)?;
+            actions::insert_result(state, &result)?;
+        }
+    }
+    state.record_history(
+        "llm",
+        Some(&capture.bundle_id),
+        Some(&capture.text),
+        Some(&result),
+        Some(&format!("prompt:{}", prompt.id)),
+    );
+    state.diag("selection prompt delivered");
+    Ok(())
+}
+
 pub async fn run_action(
     app: &AppHandle,
     state: &AppState,
     action: &str,
     custom: &str,
 ) -> Result<(), String> {
-    let capture = {
-        let guard = state.selection.lock();
-        let capture = guard
-            .as_ref()
-            .ok_or_else(|| "Нет выделенного текста".to_string())?;
-        if capture.text.trim().is_empty() {
-            return Err("Нет выделенного текста".into());
-        }
-        if capture.at.elapsed() > Duration::from_secs(120) {
-            return Err("Выделение устарело — выделите текст заново".into());
-        }
-        if !state
-            .config
-            .read()
-            .app_feature_enabled(&capture.bundle_id, Feature::Llm)
-        {
-            return Err("ИИ выключен для этого приложения".into());
-        }
-        SelectionCapture {
-            text: capture.text.clone(),
-            bundle_id: capture.bundle_id.clone(),
-            at: capture.at,
-        }
-    };
+    let capture = capture_selection(state)?;
 
     let instruction = instruction(action, custom, &capture.text)
         .ok_or_else(|| "Опишите, что сделать с текстом".to_string())?;
@@ -645,29 +739,7 @@ pub async fn run_action(
         return Ok(());
     }
 
-    let _ = platform::activate_app(&capture.bundle_id);
-    let deadline = Instant::now() + ACTIVATION_TIMEOUT;
-    let mut activated = false;
-    while Instant::now() < deadline {
-        if platform::frontmost_app_info()
-            .map(|info| info.bundle_id == capture.bundle_id)
-            .unwrap_or(false)
-        {
-            activated = true;
-            break;
-        }
-        thread::sleep(Duration::from_millis(50));
-    }
-    if !activated {
-        state.diag(&format!(
-            "selection activation timeout for {}: paste skipped",
-            capture.bundle_id
-        ));
-        let error = "Не удалось вернуться в приложение — текст не вставлен".to_string();
-        actions::show_action_error(app, state, &error);
-        return Err(error);
-    }
-    thread::sleep(ACTIVATION_SETTLE);
+    activate_capture(app, state, &capture)?;
 
     actions::insert_result(state, &result)
         .inspect_err(|error| actions::show_action_error(app, state, error))?;

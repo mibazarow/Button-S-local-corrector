@@ -158,6 +158,7 @@ pub fn run() {
             commands::selection_focus,
             commands::selection_hide,
             commands::open_prompt_editor,
+            commands::selection_prompt,
             commands::add_selection_word,
             commands::diagnostics,
             commands::export_diagnostics,

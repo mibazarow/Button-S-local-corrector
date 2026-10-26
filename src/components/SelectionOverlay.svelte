@@ -1,18 +1,18 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { listen } from "@tauri-apps/api/event";
-  import { api, type Language } from "../lib/api";
+  import { api, type Language, type Prompt } from "../lib/api";
   import { strings, type Strings } from "../lib/i18n";
 
   let lang = $state<Language>("ru");
   let t = $derived<Strings>(strings[lang]);
-  let actions = $derived([
-    { id: "fix", label: t.selectionActionFix },
-    { id: "check", label: t.selectionActionCheck },
-    { id: "formal", label: t.selectionActionFormal },
-    { id: "to_en", label: t.selectionActionToEn },
-    { id: "to_ru", label: t.selectionActionToRu },
-  ]);
+  let prompts = $state<Prompt[]>([]);
+  let actions = $derived(
+    prompts.map((prompt) => ({
+      id: prompt.id,
+      label: lang === "ru" ? prompt.name : prompt.description || prompt.name,
+    })),
+  );
   let busy = $state(false);
   let custom = $state("");
   let input = $state<HTMLInputElement | null>(null);
@@ -39,6 +39,16 @@
     setTimeout(() => input?.focus(), 60);
   }
 
+  async function runPrompt(id: string) {
+    if (busy) return;
+    busy = true;
+    try {
+      await api.selectionPrompt(id);
+    } finally {
+      await hide();
+    }
+  }
+
   function runCustom() {
     const value = custom.trim();
     if (!value) return;
@@ -53,11 +63,21 @@
     api.getState().then((state) => {
       lang = state.settings.uiLanguage;
     });
+    const loadPrompts = () => api.getPrompts().then((list) => (prompts = list));
+    loadPrompts();
 
     const stop = listen("selection-show", () => {
       busy = false;
       custom = "";
       inputFocused = false;
+      loadPrompts();
+    });
+    const stopDictation = listen<{ text: string }>("selection-dictation", (event) => {
+      const text = event.payload.text.trim();
+      if (!text) return;
+      custom = custom.trim() ? `${custom.trim()} ${text}` : text;
+      inputFocused = true;
+      setTimeout(() => input?.focus(), 30);
     });
 
     const onKey = (event: KeyboardEvent) => {
@@ -67,6 +87,7 @@
 
     return () => {
       stop.then((fn) => fn());
+      stopDictation.then((fn) => fn());
       window.removeEventListener("keydown", onKey);
     };
   });
@@ -85,10 +106,18 @@
   <div class="menu" role="group" aria-label="BUTTON-S">
     <div class="actions">
       {#each actions as action (action.id)}
-        <button disabled={busy} onclick={() => run(action.id)}>
+        <button disabled={busy} onclick={() => runPrompt(action.id)}>
           {action.label}
         </button>
       {/each}
+      <button
+        class="add-variant"
+        disabled={busy}
+        onclick={async () => {
+          await hide();
+          await api.openPromptEditor();
+        }}
+      >{t.selectionAddVariant}</button>
     </div>
     <div class="custom">
       <input
@@ -118,14 +147,6 @@
       />
       <span>{busy ? "…" : t.selectionEnterHint}</span>
     </div>
-    <button
-      class="add-variant"
-      disabled={busy}
-      onclick={async () => {
-        await hide();
-        await api.openPromptEditor();
-      }}
-    >{t.selectionAddVariant}</button>
   </div>
 </div>
 
@@ -213,7 +234,7 @@
   }
 
   .add-variant {
-    margin: 6px 8px 10px;
+    margin: 2px 8px 8px;
     padding: 9px 12px;
     border: 1px dashed #4a4d57;
     border-radius: 8px;

@@ -987,13 +987,22 @@ pub fn selection_pointer(
 }
 
 #[tauri::command]
-pub fn selection_focus(app: AppHandle) {
-    crate::selection::focus(&app);
+pub fn selection_focus(app: AppHandle, state: State<'_, Arc<AppState>>) {
+    crate::selection::focus(&app, &state);
 }
 
 #[tauri::command]
 pub fn selection_hide(app: AppHandle, state: State<'_, Arc<AppState>>) {
     crate::selection::dismiss(&app, &state);
+}
+
+#[tauri::command]
+pub async fn selection_prompt(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    id: String,
+) -> Result<(), String> {
+    crate::selection::run_prompt_selection(&app, &state, &id).await
 }
 
 #[tauri::command]

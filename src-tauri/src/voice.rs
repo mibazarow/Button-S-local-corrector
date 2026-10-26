@@ -221,7 +221,9 @@ pub fn handle_hotkey(app: &AppHandle, state: &Arc<AppState>, pressed: bool) {
         return;
     }
 
-    if platform::frontmost_bundle_id().as_deref() == Some("com.button.s") {
+    if platform::frontmost_bundle_id().as_deref() == Some("com.button.s")
+        && !state.selection_input_focused.load(Ordering::Relaxed)
+    {
         return;
     }
 
@@ -669,7 +671,22 @@ fn finish_recording(
 
     match result {
         Ok(text) if !text.trim().is_empty() => {
-            if let Err(error) = crate::actions::insert_via_clipboard(&text) {
+            let into_prompt = state.selection_input_focused.load(Ordering::Relaxed)
+                && app
+                    .get_webview_window("selection")
+                    .and_then(|window| window.is_visible().ok())
+                    .unwrap_or(false);
+            if into_prompt {
+                let _ = app.emit_to("selection", "selection-dictation", json!({ "text": text }));
+                state.record_history(
+                    "dictation",
+                    Some("com.button.s"),
+                    None,
+                    Some(&text),
+                    Some(&format!("{{\"seconds\":{}}}", seconds.round() as u64)),
+                );
+                state.emit_event("voice-state", json!({ "state": "done", "text": text }));
+            } else if let Err(error) = crate::actions::insert_via_clipboard(&text) {
                 notify_error(state, &error);
             } else {
                 state.record_history(
