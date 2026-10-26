@@ -269,7 +269,9 @@ fn handle_boundary(state: &Arc<AppState>, word: &str, separator: char) -> Option
                         .read()
                         .is_stopped(word, &suggestion.text)
                     {
-                        if typo_mode == "auto" {
+                        if typo_mode == "auto"
+                            && typo::is_confident(suggestion.distance, suggestion.confidence)
+                        {
                             if apply_change(
                                 state,
                                 &app_id,
@@ -283,7 +285,7 @@ fn handle_boundary(state: &Arc<AppState>, word: &str, separator: char) -> Option
                             ) {
                                 return Some(suggestion.text);
                             }
-                        } else {
+                        } else if typo_mode == "suggest" {
                             state.emit_event(
                                 "typo-suggestion",
                                 serde_json::json!({

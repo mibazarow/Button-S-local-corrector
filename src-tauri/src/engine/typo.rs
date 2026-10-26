@@ -168,6 +168,10 @@ fn keyboard_penalty(source: &[char], target: &[char]) -> f32 {
         .sum()
 }
 
+pub fn is_confident(distance: usize, confidence: f32) -> bool {
+    distance == 1 && confidence >= 0.7
+}
+
 struct Matrix {
     prev_prev: Vec<usize>,
     prev: Vec<usize>,
@@ -263,6 +267,14 @@ mod tests {
     fn does_not_touch_inner_case() {
         assert!(suggest("iPhone", "en", 1).is_none());
         assert!(suggest("МакДональдс", "ru", 1).is_none());
+    }
+
+    #[test]
+    fn auto_only_for_confident_single_edit() {
+        assert!(is_confident(1, 0.7));
+        assert!(is_confident(1, 0.95));
+        assert!(!is_confident(1, 0.69));
+        assert!(!is_confident(2, 0.99));
     }
 
     #[test]
