@@ -155,7 +155,6 @@ pub fn run() {
             commands::copy_to_clipboard,
             commands::selection_action,
             commands::selection_pointer,
-            commands::selection_focus,
             commands::selection_hide,
             commands::open_prompt_editor,
             commands::selection_prompt,

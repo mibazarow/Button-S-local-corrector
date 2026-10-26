@@ -79,18 +79,11 @@ const ru = {
   footer: "BUTTON-S работает в строке меню. Настройки можно открыть в любой момент.",
 
   // Голос
-  selectionActionFix: "Исправить грамматику",
-  selectionActionCheck: "Проверить грамматику",
-  selectionActionFormal: "Сделать официальным",
   selectionActionSimple: "Сделать проще",
   selectionActionShort: "Сократить",
   selectionActionSummary: "Суммировать",
   selectionActionRewrite: "Переписать",
   selectionActionBullets: "Сделать списком",
-  selectionActionToEn: "RU → EN",
-  selectionActionToRu: "EN → RU",
-  selectionPromptPlaceholder: "Что сделать с текстом?",
-  selectionEnterHint: "Enter — выполнить",
   selectionAddVariant: "Добавить свой вариант",
   voiceIntroTitle: "Как работает диктовка",
   voiceIntroText:
@@ -488,18 +481,11 @@ const en: Strings = {
   footer: "BUTTON-S lives in the menu bar. Open settings at any time.",
 
   // Voice
-  selectionActionFix: "Fix grammar",
-  selectionActionCheck: "Check grammar",
-  selectionActionFormal: "Make formal",
   selectionActionSimple: "Make simpler",
   selectionActionShort: "Shorten",
   selectionActionSummary: "Summarize",
   selectionActionRewrite: "Rewrite",
   selectionActionBullets: "Make a list",
-  selectionActionToEn: "RU → EN",
-  selectionActionToRu: "EN → RU",
-  selectionPromptPlaceholder: "What should I do with the text?",
-  selectionEnterHint: "Enter to run",
   selectionAddVariant: "Add your own variant",
   voiceIntroTitle: "How dictation works",
   voiceIntroText:

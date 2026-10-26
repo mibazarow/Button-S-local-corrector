@@ -325,7 +325,6 @@ export const api = {
     invoke<void>("selection_action", { action, prompt }),
   selectionPointer: (inside: boolean) =>
     invoke<void>("selection_pointer", { inside }),
-  selectionFocus: () => invoke<void>("selection_focus"),
   selectionHide: () => invoke<void>("selection_hide"),
   selectionPrompt: (id: string) => invoke<void>("selection_prompt", { id }),
   openPromptEditor: () => invoke<void>("open_prompt_editor"),

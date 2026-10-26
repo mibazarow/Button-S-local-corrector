@@ -987,11 +987,6 @@ pub fn selection_pointer(
 }
 
 #[tauri::command]
-pub fn selection_focus(app: AppHandle, state: State<'_, Arc<AppState>>) {
-    crate::selection::focus(&app, &state);
-}
-
-#[tauri::command]
 pub fn selection_hide(app: AppHandle, state: State<'_, Arc<AppState>>) {
     crate::selection::dismiss(&app, &state);
 }

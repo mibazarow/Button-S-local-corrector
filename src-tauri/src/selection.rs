@@ -368,7 +368,8 @@ fn show_menu(app: &AppHandle, state: &AppState, rect: tauri::Rect, generation: u
         y = clamped_y;
     }
 
-    let _ = window.set_size(LogicalSize::new(MENU_WIDTH, MENU_HEIGHT));
+    let menu_height = MENU_HEIGHT.min(72.0 + 31.0 * state.prompts.read().prompts.len() as f64);
+    let _ = window.set_size(LogicalSize::new(MENU_WIDTH, menu_height.max(180.0)));
     let _ = window.set_position(LogicalPosition::new(x, y));
     let _ = window.set_focusable(false);
 
@@ -499,14 +500,6 @@ fn clamp_menu_position(
     )
 }
 
-pub fn focus(app: &AppHandle, state: &AppState) {
-    state.selection_input_focused.store(true, Ordering::SeqCst);
-    if let Some(window) = app.get_webview_window("selection") {
-        let _ = window.set_focusable(true);
-        let _ = window.set_focus();
-    }
-}
-
 pub fn dismiss(app: &AppHandle, state: &AppState) {
     hide_menu(app, state);
 }
@@ -516,7 +509,6 @@ pub fn hide_menu(app: &AppHandle, state: &AppState) {
     state.selection_pointer_inside.store(false, Ordering::SeqCst);
     state.selection_menu_open.store(false, Ordering::SeqCst);
     state.selection_visible.store(false, Ordering::SeqCst);
-    state.selection_input_focused.store(false, Ordering::SeqCst);
     *state.selection_menu_since.lock() = None;
 
     if let Some(window) = app.get_webview_window("selection") {

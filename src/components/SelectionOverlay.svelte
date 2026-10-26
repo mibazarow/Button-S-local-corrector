@@ -14,29 +14,10 @@
     })),
   );
   let busy = $state(false);
-  let custom = $state("");
-  let input = $state<HTMLInputElement | null>(null);
-  let inputFocused = $state(false);
 
   async function hide() {
     busy = false;
-    custom = "";
     await api.selectionHide();
-  }
-
-  async function run(action: string, prompt = "") {
-    if (busy) return;
-    busy = true;
-    try {
-      await api.selectionAction(action, prompt);
-    } finally {
-      await hide();
-    }
-  }
-
-  async function focusInput() {
-    await api.selectionFocus();
-    setTimeout(() => input?.focus(), 60);
   }
 
   async function runPrompt(id: string) {
@@ -47,12 +28,6 @@
     } finally {
       await hide();
     }
-  }
-
-  function runCustom() {
-    const value = custom.trim();
-    if (!value) return;
-    run("custom", value);
   }
 
   function pointer(inside: boolean) {
@@ -68,16 +43,7 @@
 
     const stop = listen("selection-show", () => {
       busy = false;
-      custom = "";
-      inputFocused = false;
       loadPrompts();
-    });
-    const stopDictation = listen<{ text: string }>("selection-dictation", (event) => {
-      const text = event.payload.text.trim();
-      if (!text) return;
-      custom = custom.trim() ? `${custom.trim()} ${text}` : text;
-      inputFocused = true;
-      setTimeout(() => input?.focus(), 30);
     });
 
     const onKey = (event: KeyboardEvent) => {
@@ -87,7 +53,6 @@
 
     return () => {
       stop.then((fn) => fn());
-      stopDictation.then((fn) => fn());
       window.removeEventListener("keydown", onKey);
     };
   });
@@ -99,9 +64,7 @@
   aria-label="BUTTON-S"
   tabindex="-1"
   onmouseenter={() => pointer(true)}
-  onmouseleave={() => {
-    if (!inputFocused) pointer(false);
-  }}
+  onmouseleave={() => pointer(false)}
 >
   <div class="menu" role="group" aria-label="BUTTON-S">
     <div class="actions">
@@ -117,35 +80,7 @@
           await hide();
           await api.openPromptEditor();
         }}
-      >{t.selectionAddVariant}</button>
-    </div>
-    <div class="custom">
-      <input
-        bind:this={input}
-        bind:value={custom}
-        placeholder={t.selectionPromptPlaceholder}
-        spellcheck="false"
-        onpointerdown={() => {
-          inputFocused = true;
-          void focusInput();
-        }}
-        onfocus={() => {
-          inputFocused = true;
-          void focusInput();
-        }}
-        onblur={() => {
-          inputFocused = false;
-        }}
-        onkeydown={(event) => {
-          if (event.key === "Enter") {
-            if (event.isComposing) return;
-            event.preventDefault();
-            runCustom();
-          }
-          if (event.key === "Escape") hide();
-        }}
-      />
-      <span>{busy ? "…" : t.selectionEnterHint}</span>
+      ><span class="plus">+</span>{t.selectionAddVariant}</button>
     </div>
   </div>
 </div>
@@ -187,6 +122,9 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
+    min-height: 0;
+    max-height: calc(100% - 52px);
+    overflow-y: auto;
   }
 
   .actions button {
@@ -210,49 +148,38 @@
     cursor: default;
   }
 
-  .custom {
-    margin-top: auto;
-    padding-top: 8px;
-    border-top: 1px solid rgb(255 255 255 / 0.1);
-  }
-
-  .custom input {
+  .add-variant {
+    display: flex;
+    align-items: center;
+    gap: 7px;
     width: 100%;
     box-sizing: border-box;
-    border: 1px solid rgb(255 255 255 / 0.13);
-    background: rgb(255 255 255 / 0.06);
-    color: #fff;
+    margin-top: 8px;
+    padding: 8px 10px;
+    border: 1px solid #4a4d57;
+    border-radius: 8px;
+    background: #2a2c33;
+    color: #e8e9ee;
     font-family: inherit;
     font-size: 12px;
-    padding: 8px 9px;
-    border-radius: 8px;
-    outline: none;
-  }
-
-  .custom input::placeholder {
-    color: rgb(255 255 255 / 0.45);
-  }
-
-  .add-variant {
-    margin: 2px 8px 8px;
-    padding: 9px 12px;
-    border: 1px dashed #4a4d57;
-    border-radius: 8px;
-    background: transparent;
-    color: #d7d9e0;
-    font-size: 12px;
+    font-weight: 500;
+    text-align: left;
     cursor: pointer;
   }
 
   .add-variant:hover {
-    background: #2a2c33;
-    border-color: #6b6f7d;
+    background: #343741;
+    border-color: #5c6070;
   }
 
-  .custom span {
-    display: block;
-    margin-top: 5px;
-    font-size: 10px;
-    color: rgb(255 255 255 / 0.4);
+  .add-variant:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .plus {
+    font-size: 14px;
+    line-height: 1;
+    color: #b8bac4;
   }
 </style>
