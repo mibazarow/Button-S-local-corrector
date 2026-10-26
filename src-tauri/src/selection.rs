@@ -13,6 +13,7 @@ use crate::platform::{self, SelectionFailure};
 use crate::state::{AppState, SelectionCapture};
 
 const MENU_WIDTH: f64 = 300.0;
+#[cfg(test)]
 const MENU_HEIGHT: f64 = 430.0;
 const MENU_GAP: f64 = 0.0;
 const EDGE_MARGIN: f64 = 8.0;
@@ -323,9 +324,14 @@ fn point_inside_menu(app: &AppHandle) -> bool {
         && y <= top + size.height as f64 / scale
 }
 
-fn menu_height(state: &AppState) -> f64 {
-    let count = state.prompts.read().prompts.len() as f64;
-    (72.0 + 31.0 * count).clamp(180.0, MENU_HEIGHT)
+const MENU_ROW: f64 = 31.0;
+const MENU_CHROME: f64 = 76.0;
+const MENU_VISIBLE_ITEMS: usize = 8;
+
+fn menu_height(state: &AppState, has_text: bool) -> f64 {
+    let count = state.prompts.read().prompts.len().min(MENU_VISIBLE_ITEMS) as f64;
+    let note = if has_text { 0.0 } else { 30.0 };
+    MENU_CHROME + MENU_ROW * count + note
 }
 
 fn present_menu(
@@ -339,7 +345,7 @@ fn present_menu(
     let Some(window) = app.get_webview_window("selection") else {
         return;
     };
-    let height = menu_height(state);
+    let height = menu_height(state, has_text);
     let _ = window.set_size(LogicalSize::new(MENU_WIDTH, height));
     let _ = window.set_position(LogicalPosition::new(x, y));
     let _ = window.set_focusable(focus);
@@ -418,7 +424,7 @@ pub fn show_from_hotkey(app: &AppHandle, state: &Arc<AppState>) {
         let top = monitor.position().y as f64 / monitor_scale;
         let width = monitor.size().width as f64 / monitor_scale;
         let height = monitor.size().height as f64 / monitor_scale;
-        let menu_h = menu_height(state);
+        let menu_h = menu_height(state, has_text);
         let (clamped_x, clamped_y) =
             clamp_position(x, y, (MENU_WIDTH, menu_h), (left, top, width, height));
         x = clamped_x;
@@ -468,7 +474,7 @@ fn show_menu(app: &AppHandle, state: &AppState, rect: tauri::Rect, generation: u
         let top = monitor.position().y as f64 / scale;
         let width = monitor.size().width as f64 / scale;
         let height = monitor.size().height as f64 / scale;
-        let menu_h = menu_height(state);
+        let menu_h = menu_height(state, true);
         let (clamped_x, clamped_y) =
             clamp_position(x, y, (MENU_WIDTH, menu_h), (left, top, width, height));
         x = clamped_x;
