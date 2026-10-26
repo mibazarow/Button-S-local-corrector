@@ -159,6 +159,7 @@ fn run_action(app: &AppHandle, state: &Arc<AppState>, action: &str, pressed: boo
         "dictate" => {
             voice::handle_hotkey(app, state, pressed);
         }
+        "selectionMenu" if pressed => crate::selection::show_from_hotkey(app, state),
         _ => {}
     }
 }

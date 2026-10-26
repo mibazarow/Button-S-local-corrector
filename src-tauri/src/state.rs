@@ -23,6 +23,7 @@ pub enum ChangeKind {
     Manual,
 }
 
+#[derive(Clone)]
 pub struct SelectionCapture {
     pub text: String,
     pub bundle_id: String,

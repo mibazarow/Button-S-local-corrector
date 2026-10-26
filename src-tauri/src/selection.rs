@@ -323,6 +323,111 @@ fn point_inside_menu(app: &AppHandle) -> bool {
         && y <= top + size.height as f64 / scale
 }
 
+fn menu_height(state: &AppState) -> f64 {
+    let count = state.prompts.read().prompts.len() as f64;
+    (72.0 + 31.0 * count).clamp(180.0, MENU_HEIGHT)
+}
+
+fn present_menu(
+    app: &AppHandle,
+    state: &AppState,
+    x: f64,
+    y: f64,
+    has_text: bool,
+    focus: bool,
+) {
+    let Some(window) = app.get_webview_window("selection") else {
+        return;
+    };
+    let height = menu_height(state);
+    let _ = window.set_size(LogicalSize::new(MENU_WIDTH, height));
+    let _ = window.set_position(LogicalPosition::new(x, y));
+    let _ = window.set_focusable(focus);
+
+    state.selection_menu_open.store(true, Ordering::SeqCst);
+    state.selection_visible.store(true, Ordering::SeqCst);
+    state.selection_pointer_inside.store(false, Ordering::SeqCst);
+    *state.selection_menu_since.lock() = Some(Instant::now());
+
+    let _ = window.show();
+    if focus {
+        let _ = window.set_focus();
+    }
+    state.emit_event("selection-show", json!({ "hasText": has_text }));
+}
+
+pub fn show_from_hotkey(app: &AppHandle, state: &Arc<AppState>) {
+    if state.selection_visible.load(Ordering::SeqCst) {
+        hide_menu(app, state);
+        return;
+    }
+    state.selection_hover_gen.fetch_add(1, Ordering::SeqCst);
+    state.selection_tray_hovered.store(false, Ordering::SeqCst);
+
+    let frontmost = platform::frontmost_bundle_id().unwrap_or_default();
+    let capture = state.selection.lock().clone();
+    let mut has_text = capture
+        .as_ref()
+        .map(|capture| {
+            capture.bundle_id == frontmost
+                && !capture.text.trim().is_empty()
+                && capture.at.elapsed() < Duration::from_secs(120)
+                && state
+                    .config
+                    .read()
+                    .app_feature_enabled(&capture.bundle_id, Feature::Llm)
+        })
+        .unwrap_or(false);
+
+    if !has_text && !frontmost.is_empty() {
+        if let Ok(info) = platform::selection_info() {
+            let allowed = state
+                .config
+                .read()
+                .app_feature_enabled(&frontmost, Feature::Llm);
+            if allowed && !info.text.trim().is_empty() {
+                *state.selection.lock() = Some(SelectionCapture {
+                    text: info.text,
+                    bundle_id: frontmost.clone(),
+                    at: Instant::now(),
+                });
+                has_text = true;
+            }
+        }
+    }
+
+    let Some((cursor_x, cursor_y)) = platform::mouse_location() else {
+        return;
+    };
+    let Some(window) = app.get_webview_window("selection") else {
+        return;
+    };
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let monitor = window
+        .monitor_from_point(cursor_x * scale, cursor_y * scale)
+        .ok()
+        .flatten()
+        .or_else(|| window.current_monitor().ok().flatten())
+        .or_else(|| window.primary_monitor().ok().flatten());
+
+    let mut x = cursor_x + 12.0;
+    let mut y = cursor_y + 10.0;
+    if let Some(monitor) = monitor {
+        let monitor_scale = monitor.scale_factor();
+        let left = monitor.position().x as f64 / monitor_scale;
+        let top = monitor.position().y as f64 / monitor_scale;
+        let width = monitor.size().width as f64 / monitor_scale;
+        let height = monitor.size().height as f64 / monitor_scale;
+        let menu_h = menu_height(state);
+        let (clamped_x, clamped_y) =
+            clamp_position(x, y, (MENU_WIDTH, menu_h), (left, top, width, height));
+        x = clamped_x;
+        y = clamped_y;
+    }
+
+    present_menu(app, state, x, y, has_text, true);
+}
+
 fn show_menu(app: &AppHandle, state: &AppState, rect: tauri::Rect, generation: u64) {
     if state.selection_hover_gen.load(Ordering::SeqCst) != generation
         || !state.selection_tray_hovered.load(Ordering::SeqCst)
@@ -363,23 +468,14 @@ fn show_menu(app: &AppHandle, state: &AppState, rect: tauri::Rect, generation: u
         let top = monitor.position().y as f64 / scale;
         let width = monitor.size().width as f64 / scale;
         let height = monitor.size().height as f64 / scale;
-        let (clamped_x, clamped_y) = clamp_menu_position(x, y, left, top, width, height);
+        let menu_h = menu_height(state);
+        let (clamped_x, clamped_y) =
+            clamp_position(x, y, (MENU_WIDTH, menu_h), (left, top, width, height));
         x = clamped_x;
         y = clamped_y;
     }
 
-    let menu_height = MENU_HEIGHT.min(72.0 + 31.0 * state.prompts.read().prompts.len() as f64);
-    let _ = window.set_size(LogicalSize::new(MENU_WIDTH, menu_height.max(180.0)));
-    let _ = window.set_position(LogicalPosition::new(x, y));
-    let _ = window.set_focusable(false);
-
-    state.selection_menu_open.store(true, Ordering::SeqCst);
-    state.selection_visible.store(true, Ordering::SeqCst);
-    state.selection_pointer_inside.store(false, Ordering::SeqCst);
-    *state.selection_menu_since.lock() = Some(Instant::now());
-
-    let _ = window.show();
-    state.emit_event("selection-show", json!({}));
+    present_menu(app, state, x, y, true, false);
 }
 
 pub fn tray_enter(app: &AppHandle, state: &Arc<AppState>, rect: tauri::Rect) {
@@ -484,6 +580,7 @@ fn clamp_position(
     (x.clamp(min_x, max_x), y.clamp(min_y, max_y))
 }
 
+#[cfg(test)]
 fn clamp_menu_position(
     x: f64,
     y: f64,

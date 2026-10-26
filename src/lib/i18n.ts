@@ -85,6 +85,7 @@ const ru = {
   selectionActionRewrite: "Переписать",
   selectionActionBullets: "Сделать списком",
   selectionAddVariant: "Добавить свой вариант",
+  selectionNoText: "Нет выделенного текста — выделите текст и откройте меню снова.",
   voiceIntroTitle: "Как работает диктовка",
   voiceIntroText:
     "Нажмите {hotkey} в любом приложении и говорите — текст появится там, где стоит курсор. Сначала скачайте модель: она работает на этом Mac, аудио не уходит в интернет.",
@@ -377,6 +378,7 @@ const ru = {
   actionTranslateEnRu: "Перевести EN → RU",
   actionLlmFix: "Исправить текст через ИИ",
   actionPauseAll: "Пауза всех функций",
+  actionSelectionMenu: "Меню действий с текстом",
 
   // Данные
   backupTitle: "Резервная копия",
@@ -487,6 +489,7 @@ const en: Strings = {
   selectionActionRewrite: "Rewrite",
   selectionActionBullets: "Make a list",
   selectionAddVariant: "Add your own variant",
+  selectionNoText: "No text selected — select text and open the menu again.",
   voiceIntroTitle: "How dictation works",
   voiceIntroText:
     "Press {hotkey} in any app and speak — the text appears at the cursor. First download a model: it runs on this Mac and audio never leaves the computer.",
@@ -776,6 +779,7 @@ const en: Strings = {
   actionTranslateEnRu: "Translate EN → RU",
   actionLlmFix: "Fix text with AI",
   actionPauseAll: "Pause all features",
+  actionSelectionMenu: "Text actions menu",
 
   // Data
   backupTitle: "Backup",

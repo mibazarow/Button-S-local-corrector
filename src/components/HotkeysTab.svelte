@@ -20,6 +20,7 @@
     { key: "translateEnRu", label: t.actionTranslateEnRu },
     { key: "llmFix", label: t.actionLlmFix },
     { key: "pauseAll", label: t.actionPauseAll },
+    { key: "selectionMenu", label: t.actionSelectionMenu },
   ]);
 
   const defaults: Record<string, string> = {
@@ -30,6 +31,7 @@
     translateRuEn: "Command+Alt+KeyT",
     translateEnRu: "Command+Alt+Shift+KeyT",
     pauseAll: "Command+Alt+KeyP",
+    selectionMenu: "Control+KeyM",
     llmFix: "Command+Alt+KeyF",
   };
 

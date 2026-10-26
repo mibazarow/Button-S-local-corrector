@@ -14,6 +14,7 @@
     })),
   );
   let busy = $state(false);
+  let hasText = $state(true);
 
   async function hide() {
     busy = false;
@@ -41,19 +42,25 @@
     const loadPrompts = () => api.getPrompts().then((list) => (prompts = list));
     loadPrompts();
 
-    const stop = listen("selection-show", () => {
+    const stop = listen<{ hasText?: boolean }>("selection-show", (event) => {
       busy = false;
+      hasText = event.payload.hasText !== false;
       loadPrompts();
     });
 
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") hide();
     };
+    const onBlur = () => {
+      if (!busy) hide();
+    };
     window.addEventListener("keydown", onKey);
+    window.addEventListener("blur", onBlur);
 
     return () => {
       stop.then((fn) => fn());
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener("blur", onBlur);
     };
   });
 </script>
@@ -69,10 +76,13 @@
   <div class="menu" role="group" aria-label="BUTTON-S">
     <div class="actions">
       {#each actions as action (action.id)}
-        <button disabled={busy} onclick={() => runPrompt(action.id)}>
+        <button disabled={busy || !hasText} onclick={() => runPrompt(action.id)}>
           {action.label}
         </button>
       {/each}
+      {#if !hasText}
+        <p class="no-text">{t.selectionNoText}</p>
+      {/if}
     </div>
     <button
       class="add-variant"
@@ -141,6 +151,13 @@
 
   .actions button:hover {
     background: rgb(255 255 255 / 0.09);
+  }
+
+  .no-text {
+    margin: 2px 8px;
+    color: #b9bbc5;
+    font-size: 11px;
+    line-height: 1.35;
   }
 
   .actions button:disabled {

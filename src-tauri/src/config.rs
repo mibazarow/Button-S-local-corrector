@@ -441,6 +441,7 @@ pub fn default_hotkeys() -> BTreeMap<String, String> {
         ("translateEnRu", "Command+Alt+Shift+KeyT"),
         ("pauseAll", "Command+Alt+KeyP"),
         ("llmFix", "Command+Alt+KeyF"),
+        ("selectionMenu", "Control+KeyM"),
     ]
     .into_iter()
     .map(|(key, value)| (key.to_string(), value.to_string()))
@@ -774,6 +775,7 @@ mod tests {
     #[test]
     fn default_dictation_is_right_shift() {
         assert_eq!(default_hotkeys()["dictate"], "ShiftRight");
+        assert_eq!(default_hotkeys()["selectionMenu"], "Control+KeyM");
         assert_eq!(Voice::default().hotkey, "ShiftRight");
         assert!(is_modifier_only_combo("ShiftRight"));
         assert!(!is_modifier_only_combo("Command+Alt+Space"));
