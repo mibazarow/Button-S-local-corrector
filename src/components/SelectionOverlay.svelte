@@ -73,15 +73,15 @@
           {action.label}
         </button>
       {/each}
-      <button
-        class="add-variant"
-        disabled={busy}
-        onclick={async () => {
-          await hide();
-          await api.openPromptEditor();
-        }}
-      ><span class="plus">+</span>{t.selectionAddVariant}</button>
     </div>
+    <button
+      class="add-variant"
+      disabled={busy}
+      onclick={async () => {
+        await hide();
+        await api.openPromptEditor();
+      }}
+    ><span class="plus">+</span>{t.selectionAddVariant}</button>
   </div>
 </div>
 
