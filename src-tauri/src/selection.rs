@@ -533,10 +533,17 @@ fn instruction(action: &str, custom: &str, text: &str) -> Option<String> {
             if custom.is_empty() {
                 return None;
             }
-            (custom.to_string(), llm::language_rule(text))
+            (
+                format!("{custom}\nReturn only the final text, with no explanations."),
+                llm::language_rule(text),
+            )
         }
         "fix" => (
             "Fix spelling, punctuation, and typos. Return only the corrected text.".to_string(),
+            llm::language_rule(text),
+        ),
+        "check" => (
+            "Check spelling, grammar, and punctuation. Return only a short list of corrections in the form 'wrong -> right', one per line. If there are no errors, return the original text unchanged. Do not add explanations.".to_string(),
             llm::language_rule(text),
         ),
         "formal" => (
@@ -632,6 +639,12 @@ pub async fn run_action(
 
     dismiss(app, state);
 
+    if action == "check" {
+        actions::show_result(app, &result);
+        state.diag("selection check shown");
+        return Ok(());
+    }
+
     let _ = platform::activate_app(&capture.bundle_id);
     let deadline = Instant::now() + ACTIVATION_TIMEOUT;
     let mut activated = false;
@@ -724,7 +737,7 @@ mod tests {
         let value = instruction("custom", "  rewrite formally  ", "Привет").expect("custom");
         assert_eq!(
             value,
-            "rewrite formally\nSource language: Russian. Unless the instruction explicitly asks for translation, write the result in Russian."
+            "rewrite formally\nReturn only the final text, with no explanations.\nSource language: Russian. Unless the instruction explicitly asks for translation, write the result in Russian."
         );
     }
 

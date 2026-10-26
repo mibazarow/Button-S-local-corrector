@@ -17,7 +17,13 @@
     config = $bindable(),
     refresh,
     lang,
-  }: { config: Config; refresh: () => void; lang: "ru" | "en" } = $props();
+    newPromptToken = 0,
+  }: {
+    config: Config;
+    refresh: () => void;
+    lang: "ru" | "en";
+    newPromptToken?: number;
+  } = $props();
 
   let t: Strings = $derived(strings[lang]);
 
@@ -390,6 +396,18 @@
     }
   }
 
+  $effect(() => {
+    if (newPromptToken <= 0) return;
+    selectedId = "";
+    draft = emptyPrompt();
+    setTimeout(() => {
+      document.getElementById("prompt-editor-card")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 80);
+  });
+
   onMount(() => {
     load();
     const stop = listen<{ state: string; kind: string }>("action-state", (event) => {
@@ -713,10 +731,11 @@
 
 <!-- ======================= Действия с текстом ======================= -->
 <div class="card">
-  <div class="card-head">
+  <div class="card-head" id="prompt-editor-card">
     <div>
       <h3 style="margin:0">{t.promptsTitle}</h3>
       <p class="hint" style="margin-top:3px">{t.promptsSubtitle}</p>
+      <p class="hint" style="margin-top:6px">{t.promptsAddHint}</p>
     </div>
     <button
       class="btn small primary"
@@ -775,6 +794,7 @@
             />
             <span class="small muted">{t.promptNoteHint}</span>
           </label>
+          {#if draft.id}
           <details class="advanced">
             <summary>{t.promptAdvanced}</summary>
             <div class="stack" style="margin-top:8px">
@@ -813,6 +833,7 @@
               <p class="hint">{t.promptVars}</p>
             </div>
           </details>
+          {/if}
           <div class="inline">
             <button class="btn primary" onclick={savePrompt}>{t.save}</button>
             {#if draft.id}

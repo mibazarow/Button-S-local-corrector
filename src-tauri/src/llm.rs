@@ -133,15 +133,24 @@ impl PromptStore {
             Err(_) => PromptStore::default(),
         };
 
-        for builtin in builtin_prompts() {
+        let builtins = builtin_prompts();
+        let ids: std::collections::HashSet<&str> =
+            builtins.iter().map(|prompt| prompt.id.as_str()).collect();
+        store
+            .prompts
+            .retain(|prompt| !prompt.builtin || ids.contains(prompt.id.as_str()));
+
+        for builtin in builtins {
             match store
                 .prompts
                 .iter_mut()
                 .find(|prompt| prompt.id == builtin.id)
             {
                 Some(existing) => {
+                    existing.name = builtin.name;
                     existing.template = builtin.template;
                     existing.description = builtin.description;
+                    existing.output = builtin.output;
                 }
                 None => store.prompts.push(builtin),
             }
@@ -189,17 +198,19 @@ pub fn builtin_prompts() -> Vec<Prompt> {
     [
         (
             "fix-grammar",
-            "Исправить орфографию",
-            "Fix spelling and grammar",
-            "Fix spelling, punctuation, and typos. Return only the corrected text without explanations.\n\n{{text}}",
+            "Исправить грамматику",
+            "Fix grammar",
+            "Fix spelling, grammar, punctuation, and typos. Return only the corrected text without explanations.\n\n{{text}}",
             "Command+Alt+KeyF",
+            "replace",
         ),
         (
-            "shorten",
-            "Сократить",
-            "Shorten",
-            "Shorten the text while preserving its meaning. Return only the result.\n\n{{text}}",
+            "check-grammar",
+            "Проверить грамматику",
+            "Check grammar",
+            "Check spelling, grammar, and punctuation. Return only a short list of corrections in the form 'wrong -> right', one per line. If there are no errors, return the text unchanged. Do not add explanations.\n\n{{text}}",
             "",
+            "popup",
         ),
         (
             "formal",
@@ -207,39 +218,28 @@ pub fn builtin_prompts() -> Vec<Prompt> {
             "Rewrite formally",
             "Rewrite the text in a formal business style. Return only the result.\n\n{{text}}",
             "",
+            "replace",
         ),
         (
-            "rephrase",
-            "Перефразировать",
-            "Rephrase",
-            "Rephrase the text in different words while preserving its meaning and tone. Return only the result.\n\n{{text}}",
+            "translate-ru-en",
+            "Перевести с русского на английский",
+            "Translate Russian to English",
+            "Translate the text into English. Preserve paragraphs, lists, and line breaks. Return only the translation, with no explanations.\nSource language: Russian. Output language: English.\n\n{{text}}",
             "",
+            "replace",
         ),
         (
-            "improve",
-            "Улучшить",
-            "Improve",
-            "Improve the text: make it clearer, more correct, and more natural while preserving its meaning and style. Return only the result.\n\n{{text}}",
+            "translate-en-ru",
+            "Перевести с английского на русский",
+            "Translate English to Russian",
+            "Translate the text into Russian. Preserve paragraphs, lists, and line breaks. Return only the translation, with no explanations.\nSource language: English. Output language: Russian.\n\n{{text}}",
             "",
-        ),
-        (
-            "summarize",
-            "Суммировать",
-            "Summarize",
-            "Summarize the text in 3-5 bullet points. Return only the summary.\n\n{{text}}",
-            "",
-        ),
-        (
-            "reply-email",
-            "Ответить на письмо",
-            "Reply to email",
-            "Write a polite reply to this email. Return only the reply text.\n\n{{text}}",
-            "",
+            "replace",
         ),
     ]
         .into_iter()
         .map(
-            |(id, name, description, template, hotkey)| Prompt {
+            |(id, name, description, template, hotkey, output)| Prompt {
                 id: id.into(),
                 name: name.into(),
                 description: description.into(),
@@ -249,7 +249,7 @@ pub fn builtin_prompts() -> Vec<Prompt> {
                 provider: String::new(),
                 model: String::new(),
                 temperature: 0.2,
-                output: "replace".into(),
+                output: output.into(),
                 builtin: true,
             },
         )
@@ -791,6 +791,46 @@ pub fn clean_output(raw: &str) -> String {
     strip_wrapping_quotes(&text)
 }
 
+pub fn clean_translation_output(raw: &str) -> String {
+    let cleaned = clean_output(raw);
+    let mut paragraphs: Vec<&str> = cleaned
+        .split("\n\n")
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect();
+    if paragraphs.len() < 2 {
+        return cleaned;
+    }
+
+    let mut dropped = 0;
+    while dropped < 2 && paragraphs.len() > 1 {
+        let first = paragraphs[0];
+        let lower = first.to_lowercase();
+        let meta = [
+            "это ваш",
+            "ваш текст",
+            "я перевел",
+            "я перевела",
+            "вот перевод",
+            "ниже перевод",
+            "перевод:",
+            "here is the translation",
+            "the translation is",
+            "i have translated",
+            "this is your",
+        ]
+        .iter()
+        .any(|marker| lower.contains(marker));
+        if !meta || first.chars().count() > 300 {
+            break;
+        }
+        paragraphs.remove(0);
+        dropped += 1;
+    }
+
+    paragraphs.join("\n\n")
+}
+
 fn strip_code_fence(text: &str) -> String {
     let trimmed = text.trim();
     if trimmed.len() < 6 || !trimmed.starts_with("```") || !trimmed.ends_with("```") {
@@ -1066,11 +1106,39 @@ mod tests {
             refreshed.template,
             builtin_prompts()[0].template
         );
-        assert_eq!(refreshed.name, "Моё имя");
+        assert_eq!(refreshed.name, builtin_prompts()[0].name);
         assert_eq!(
             loaded.get("user-custom").map(|prompt| prompt.template.as_str()),
             Some("Переведи: {{text}}")
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_drops_obsolete_builtins_but_keeps_user_prompts() {
+        let dir = std::env::temp_dir().join(format!("button-s-prompts-prune-{}", now_millis()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = PromptStore::path_in(&dir);
+        let obsolete = Prompt {
+            id: "summarize".into(),
+            builtin: true,
+            ..Prompt::default()
+        };
+        let user = Prompt {
+            id: "user-custom".into(),
+            template: "{{text}}".into(),
+            ..Prompt::default()
+        };
+        PromptStore {
+            prompts: vec![obsolete, user],
+        }
+        .save(&path)
+        .expect("save");
+
+        let loaded = PromptStore::load(&path);
+        assert!(loaded.get("summarize").is_none());
+        assert!(loaded.get("user-custom").is_some());
+        assert_eq!(loaded.prompts.iter().filter(|prompt| prompt.builtin).count(), 5);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1147,6 +1215,24 @@ mod tests {
         assert_eq!(clean_output("«Привет, мир»"), "Привет, мир");
         assert_eq!(clean_output("“Hello”"), "Hello");
         assert_eq!(clean_output("\"Hello\""), "Hello");
+    }
+
+    #[test]
+    fn clean_translation_drops_chatty_lead_paragraph() {
+        assert_eq!(
+            clean_translation_output(
+                "Это ваш английский текст. Я перевела его ниже.\n\nПривет, как дела?"
+            ),
+            "Привет, как дела?"
+        );
+        assert_eq!(
+            clean_translation_output("Here is the translation:\n\nHello, world."),
+            "Hello, world."
+        );
+        assert_eq!(
+            clean_translation_output("Привет,\n\nкак дела?"),
+            "Привет,\n\nкак дела?"
+        );
     }
 
     #[test]

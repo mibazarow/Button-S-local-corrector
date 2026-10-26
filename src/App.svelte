@@ -35,6 +35,7 @@
   let testResult = $state(null) as ConversionResult | null;
   let testTimer: ReturnType<typeof setTimeout> | undefined;
   let tab = $state("main");
+  let promptEditorToken = $state(0);
   let voiceState = $state("idle");
   let voiceModel = $state(null) as VoiceModelStatus | null;
   let toast = $state<{ kind: string; text: string } | null>(null);
@@ -167,6 +168,10 @@
     const unlistenToast = listen<{ kind: string; text: string }>("toast", (event) => {
       showToast(event.payload.kind, event.payload.text);
     });
+    const unlistenPrompt = listen("open-prompt-editor", () => {
+      tab = "ai";
+      promptEditorToken += 1;
+    });
     const timer = setInterval(() => {
       refresh();
       loadVoice();
@@ -177,6 +182,7 @@
       unlistenState.then((fn) => fn());
       unlistenVoice.then((fn) => fn());
       unlistenToast.then((fn) => fn());
+      unlistenPrompt.then((fn) => fn());
     };
   });
 </script>
@@ -400,7 +406,7 @@
       {:else if tab === "apps"}
         <AppsTab bind:config refresh={refresh} lang={lang} />
       {:else if tab === "ai"}
-        <AiTab bind:config refresh={refresh} lang={lang} />
+        <AiTab bind:config refresh={refresh} lang={lang} newPromptToken={promptEditorToken} />
       {:else if tab === "hotkeys"}
         <HotkeysTab bind:config refresh={refresh} lang={lang} />
       {/if}

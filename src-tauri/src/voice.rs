@@ -669,7 +669,7 @@ fn finish_recording(
 
     match result {
         Ok(text) if !text.trim().is_empty() => {
-            if let Err(error) = platform::insert_text(&text) {
+            if let Err(error) = crate::actions::insert_via_clipboard(&text) {
                 notify_error(state, &error);
             } else {
                 state.record_history(

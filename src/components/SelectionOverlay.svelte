@@ -8,12 +8,8 @@
   let t = $derived<Strings>(strings[lang]);
   let actions = $derived([
     { id: "fix", label: t.selectionActionFix },
+    { id: "check", label: t.selectionActionCheck },
     { id: "formal", label: t.selectionActionFormal },
-    { id: "simple", label: t.selectionActionSimple },
-    { id: "short", label: t.selectionActionShort },
-    { id: "summary", label: t.selectionActionSummary },
-    { id: "rewrite", label: t.selectionActionRewrite },
-    { id: "bullets", label: t.selectionActionBullets },
     { id: "to_en", label: t.selectionActionToEn },
     { id: "to_ru", label: t.selectionActionToRu },
   ]);
@@ -122,6 +118,14 @@
       />
       <span>{busy ? "…" : t.selectionEnterHint}</span>
     </div>
+    <button
+      class="add-variant"
+      disabled={busy}
+      onclick={async () => {
+        await hide();
+        await api.openPromptEditor();
+      }}
+    >{t.selectionAddVariant}</button>
   </div>
 </div>
 
@@ -206,6 +210,22 @@
 
   .custom input::placeholder {
     color: rgb(255 255 255 / 0.45);
+  }
+
+  .add-variant {
+    margin: 6px 8px 10px;
+    padding: 9px 12px;
+    border: 1px dashed #4a4d57;
+    border-radius: 8px;
+    background: transparent;
+    color: #d7d9e0;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .add-variant:hover {
+    background: #2a2c33;
+    border-color: #6b6f7d;
   }
 
   .custom span {

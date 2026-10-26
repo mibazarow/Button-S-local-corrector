@@ -80,6 +80,7 @@ const ru = {
 
   // Голос
   selectionActionFix: "Исправить грамматику",
+  selectionActionCheck: "Проверить грамматику",
   selectionActionFormal: "Сделать официальным",
   selectionActionSimple: "Сделать проще",
   selectionActionShort: "Сократить",
@@ -90,6 +91,7 @@ const ru = {
   selectionActionToRu: "EN → RU",
   selectionPromptPlaceholder: "Что сделать с текстом?",
   selectionEnterHint: "Enter — выполнить",
+  selectionAddVariant: "Добавить свой вариант",
   voiceIntroTitle: "Как работает диктовка",
   voiceIntroText:
     "Нажмите {hotkey} в любом приложении и говорите — текст появится там, где стоит курсор. Сначала скачайте модель: она работает на этом Mac, аудио не уходит в интернет.",
@@ -332,6 +334,7 @@ const ru = {
   // ИИ — промпты
   promptsTitle: "Действия с текстом",
   promptsSubtitle: "Готовые команды для ИИ — и ваши собственные.",
+  promptsAddHint: "Чтобы добавить свой вариант, впишите в «Шаблон» инструкцию и обязательно оставьте {{text}} там, где должен оказаться выделенный текст. Например: «Сделай текст короче, сохрани смысл. Верни только результат. {{text}}». Провайдер, модель и температура для своих вариантов не нужны — используются настройки по умолчанию.",
   promptsIntroTitle: "Как пользоваться действиями",
   promptsIntroText:
     "Выделите текст в любом приложении и нажмите «Запустить» (или назначьте хоткей). ИИ вернёт результат: по умолчанию он заменит выделение. Готовые действия можно менять, а свои — добавлять.",
@@ -486,6 +489,7 @@ const en: Strings = {
 
   // Voice
   selectionActionFix: "Fix grammar",
+  selectionActionCheck: "Check grammar",
   selectionActionFormal: "Make formal",
   selectionActionSimple: "Make simpler",
   selectionActionShort: "Shorten",
@@ -496,6 +500,7 @@ const en: Strings = {
   selectionActionToRu: "EN → RU",
   selectionPromptPlaceholder: "What should I do with the text?",
   selectionEnterHint: "Enter to run",
+  selectionAddVariant: "Add your own variant",
   voiceIntroTitle: "How dictation works",
   voiceIntroText:
     "Press {hotkey} in any app and speak — the text appears at the cursor. First download a model: it runs on this Mac and audio never leaves the computer.",
@@ -735,6 +740,7 @@ const en: Strings = {
   // AI — prompts
   promptsTitle: "Text actions",
   promptsSubtitle: "Ready-made commands for AI — and your own.",
+  promptsAddHint: "To add your own variant, write the instruction in “Template” and keep {{text}} where the selected text should go. Example: “Make the text shorter and keep the meaning. Return only the result. {{text}}”. Provider, model and temperature are not needed for custom variants — defaults are used.",
   promptsIntroTitle: "How to use text actions",
   promptsIntroText:
     "Select text in any app and press “Run” (or assign a hotkey). AI returns the result: by default it replaces the selection. You can edit ready-made actions and add your own.",

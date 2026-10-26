@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_autostart::ManagerExt;
 
 use crate::actions;
@@ -994,6 +994,16 @@ pub fn selection_focus(app: AppHandle) {
 #[tauri::command]
 pub fn selection_hide(app: AppHandle, state: State<'_, Arc<AppState>>) {
     crate::selection::dismiss(&app, &state);
+}
+
+#[tauri::command]
+pub fn open_prompt_editor(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("settings")
+        .ok_or_else(|| "Окно настроек недоступно".to_string())?;
+    window.show().map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())?;
+    app.emit("open-prompt-editor", ()).map_err(|error| error.to_string())
 }
 
 #[tauri::command]

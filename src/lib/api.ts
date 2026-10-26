@@ -327,6 +327,7 @@ export const api = {
     invoke<void>("selection_pointer", { inside }),
   selectionFocus: () => invoke<void>("selection_focus"),
   selectionHide: () => invoke<void>("selection_hide"),
+  openPromptEditor: () => invoke<void>("open_prompt_editor"),
   diagnostics: () => invoke<string>("diagnostics"),
   exportDiagnostics: (path: string) =>
     invoke<string>("export_diagnostics", { path }),

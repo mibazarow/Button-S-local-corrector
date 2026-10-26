@@ -159,7 +159,7 @@ pub fn target_word() -> Option<String> {
     tail_word(&context.before).map(|(word, _)| word)
 }
 
-pub fn insert_result(state: &AppState, text: &str) -> Result<(), String> {
+pub fn insert_via_clipboard(text: &str) -> Result<(), String> {
     if platform::secure_input() {
         return Err("Защищённое поле: вставка отключена".into());
     }
@@ -178,7 +178,11 @@ pub fn insert_result(state: &AppState, text: &str) -> Result<(), String> {
         }
         Err(_) => platform::insert_text(text)?,
     }
+    Ok(())
+}
 
+pub fn insert_result(state: &AppState, text: &str) -> Result<(), String> {
+    insert_via_clipboard(text)?;
     state.diag(&format!("ai insert ok: {} chars", text.chars().count()));
     state.record_history("llm", None, None, Some(text), None);
     Ok(())
@@ -379,7 +383,7 @@ pub async fn translate(
     );
 
     let result = result?;
-    let result = llm::clean_output(&result);
+    let result = llm::clean_translation_output(&result);
     state.diag(&format!(
         "ai translate done: {} chars",
         result.chars().count()

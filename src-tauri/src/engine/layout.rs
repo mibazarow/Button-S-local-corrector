@@ -280,6 +280,12 @@ mod tests {
     }
 
     #[test]
+    fn converts_capitalized_wrong_layout_word() {
+        let decision = decide("Ghbdtn", &layout()).expect("capitalized layout conversion");
+        assert_eq!(decision.text, "Привет");
+    }
+
+    #[test]
     fn keeps_valid_words() {
         assert!(decide("привет", &layout()).is_none());
         assert!(decide("hello", &layout()).is_none());

@@ -218,9 +218,7 @@ fn handle_boundary(state: &Arc<AppState>, word: &str, separator: char) -> Option
     let source_is_known = typo::language_of_word(word)
         .map(|language| dictionary::dictionary().known(language, word))
         .unwrap_or(false);
-    if context::has_inner_uppercase(word)
-        || (context::looks_like_proper_noun(word) && !source_is_known)
-    {
+    if context::has_inner_uppercase(word) {
         return None;
     }
 
@@ -230,6 +228,13 @@ fn handle_boundary(state: &Arc<AppState>, word: &str, separator: char) -> Option
     } else {
         None
     };
+
+    if layout_decision.is_none()
+        && context::looks_like_proper_noun(word)
+        && !source_is_known
+    {
+        return None;
+    }
 
     if !source_is_known {
         if let Some(decision) = layout_decision.as_ref() {
