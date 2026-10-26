@@ -46,6 +46,7 @@ models/
 *.p12
 *.cer
 *.key
+docs/gitverse-token.md
 
 # Internal docs and design screenshots (not published)
 .internal/
