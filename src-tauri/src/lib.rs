@@ -218,6 +218,7 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building BUTTON-S")
         .run(|app, event| {
+            #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = event {
                 let selection_visible = app
                     .get_webview_window("selection")

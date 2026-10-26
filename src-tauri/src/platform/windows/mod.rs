@@ -15,7 +15,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{w, PWSTR};
 
-use super::{AxContext, Permissions, RunningApp, RunningAppInfo, SelectionFailure, SelectionInfo};
+use super::{AxContext, Permissions, RunningAppInfo, SelectionFailure, SelectionInfo};
 use crate::state::AppState;
 
 mod apps;

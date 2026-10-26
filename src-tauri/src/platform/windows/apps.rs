@@ -1,4 +1,5 @@
-use windows::Win32::Foundation::{BOOL, HWND, LPARAM};
+use windows::core::BOOL;
+use windows::Win32::Foundation::{HWND, LPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, IsWindowVisible, SetForegroundWindow, ShowWindow, SW_RESTORE,
 };
