@@ -1,3 +1,4 @@
+use super::context;
 use super::dictionary;
 use super::layout::language_of;
 
@@ -18,13 +19,16 @@ pub fn suggest(word: &str, language: &str, max_distance: usize) -> Option<TypoSu
     if word.chars().filter(|c| c.is_uppercase()).count() == word.chars().count() {
         return None;
     }
-    if dictionary::dictionary().score(language, word) > 0.0 {
+    if context::has_inner_uppercase(word) {
+        return None;
+    }
+    if dictionary::dictionary().known(language, word) {
         return None;
     }
 
     let list = dictionary::dictionary().list(language)?;
     let source: Vec<char> = dictionary::normalize(word).chars().collect();
-    let mut best: Option<(&'static str, usize, f32)> = None;
+    let mut best: Option<(&'static str, usize, f32, f32)> = None;
     let mut rows = Matrix::new(source.len(), max_distance);
 
     for (candidate, candidate_chars) in list.words.iter().zip(list.chars.iter()) {
@@ -38,21 +42,25 @@ pub fn suggest(word: &str, language: &str, max_distance: usize) -> Option<TypoSu
             continue;
         };
         let score = list.scores.get(candidate).copied().unwrap_or(0.0);
-        if score < 2.5 {
+        if score < 3.0 {
             continue;
         }
+        let penalty = keyboard_penalty(&source, candidate_chars);
         let better = match best {
             None => true,
-            Some((_, best_distance, best_score)) => {
-                distance < best_distance || (distance == best_distance && score > best_score)
+            Some((_, best_distance, best_penalty, best_score)) => {
+                distance < best_distance
+                    || (distance == best_distance
+                        && (penalty < best_penalty
+                            || (penalty == best_penalty && score > best_score)))
             }
         };
         if better {
-            best = Some((candidate, distance, score));
+            best = Some((candidate, distance, penalty, score));
         }
     }
 
-    let (candidate, distance, score) = best?;
+    let (candidate, distance, _, score) = best?;
     let confidence = match distance {
         1 => (score / 7.0).clamp(0.6, 0.99),
         _ => (score / 9.0).clamp(0.5, 0.9),
@@ -89,6 +97,75 @@ fn restore_case(original: &str, replacement: &str) -> String {
         return result;
     }
     replacement.to_string()
+}
+
+const KEY_ROWS: [(&str, &str); 3] = [
+    ("qwertyuiop", "йцукенгшщзхъ"),
+    ("asdfghjkl", "фывапролджэ"),
+    ("zxcvbnm", "ячсмитьбюё"),
+];
+
+fn key_position(ch: char) -> Option<(usize, usize)> {
+    let lower = ch.to_lowercase().next()?;
+    for (row, (latin, cyrillic)) in KEY_ROWS.iter().enumerate() {
+        if let Some(col) = latin.chars().position(|c| c == lower) {
+            return Some((row, col));
+        }
+        if let Some(col) = cyrillic.chars().position(|c| c == lower) {
+            return Some((row, col));
+        }
+    }
+    None
+}
+
+fn keys_adjacent(left: char, right: char) -> bool {
+    let (Some((left_row, left_col)), Some((right_row, right_col))) =
+        (key_position(left), key_position(right))
+    else {
+        return false;
+    };
+    if left_row == right_row {
+        return left_col.abs_diff(right_col) == 1;
+    }
+    left_row.abs_diff(right_row) == 1 && left_col.abs_diff(right_col) <= 1
+}
+
+fn single_transposition(source: &[char], target: &[char]) -> bool {
+    if source.len() != target.len() {
+        return false;
+    }
+    let mismatches: Vec<usize> = source
+        .iter()
+        .zip(target)
+        .enumerate()
+        .filter_map(|(index, (left, right))| (left != right).then_some(index))
+        .collect();
+    mismatches.len() == 2
+        && mismatches[1] == mismatches[0] + 1
+        && source[mismatches[0]] == target[mismatches[1]]
+        && source[mismatches[1]] == target[mismatches[0]]
+}
+
+fn keyboard_penalty(source: &[char], target: &[char]) -> f32 {
+    if source.len() != target.len() {
+        return 0.0;
+    }
+    if single_transposition(source, target) {
+        return 0.0;
+    }
+    source
+        .iter()
+        .zip(target)
+        .map(|(left, right)| {
+            if left == right {
+                0.0
+            } else if keys_adjacent(*left, *right) {
+                0.3
+            } else {
+                0.6
+            }
+        })
+        .sum()
 }
 
 struct Matrix {
@@ -180,5 +257,23 @@ mod tests {
     fn does_not_touch_urls_or_symbols() {
         assert!(suggest("http://x", "en", 1).is_none());
         assert!(suggest("a1b2", "en", 1).is_none());
+    }
+
+    #[test]
+    fn does_not_touch_inner_case() {
+        assert!(suggest("iPhone", "en", 1).is_none());
+        assert!(suggest("МакДональдс", "ru", 1).is_none());
+    }
+
+    #[test]
+    fn keyboard_distance_breaks_ties() {
+        assert!(keys_adjacent('s', 'd'));
+        assert!(keys_adjacent('ф', 'ы'));
+        assert!(!keys_adjacent('s', 'o'));
+
+        let source: Vec<char> = "slives".chars().collect();
+        let slices: Vec<char> = "slices".chars().collect();
+        let olives: Vec<char> = "olives".chars().collect();
+        assert!(keyboard_penalty(&source, &slices) < keyboard_penalty(&source, &olives));
     }
 }

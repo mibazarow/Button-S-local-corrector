@@ -27,3 +27,16 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+Bundled Russian word-form index
+-------------------------------
+
+The file src-tauri/data/ru_words.fst is a transformed index of Russian word
+forms from the Russian Spelling Dictionary project
+(https://github.com/Goudron/ru-spelling-dictionary, release 1.0.9),
+Copyright (c) 2026 Valery Ledovskoy and contributors, licensed under the
+Mozilla Public License 2.0 (https://mozilla.org/MPL/2.0/).
+
+The source word list was lower-cased, normalized (ё -> е), filtered to
+alphabetic forms, de-duplicated and encoded as an FST. The corresponding
+Source Code Form is available at the project URL above.

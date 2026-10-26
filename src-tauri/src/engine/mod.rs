@@ -1,3 +1,4 @@
+pub mod context;
 pub mod dictionary;
 pub mod layout;
 pub mod rules;
@@ -20,7 +21,8 @@ pub fn start(state: Arc<AppState>) {
     thread::spawn(move || {
         let mut buffer = String::new();
         let mut line = String::new();
-        let mut sentence_start = false;
+        let mut tracker = context::SentenceTracker::default();
+        let mut last_boundary = None;
 
         for event in receiver {
             match event {
@@ -31,12 +33,13 @@ pub fn start(state: Arc<AppState>) {
                     if line.chars().count() < 1024 {
                         line.push(ch);
                     }
-                    handle_char(&state, &mut buffer, &mut sentence_start, ch);
+                    let capitalize = tracker.on_char(ch);
+                    handle_char(&state, &mut buffer, capitalize, ch);
                 }
                 KeyEvent::Backspace => {
                     buffer.pop();
                     line.pop();
-                    sentence_start = false;
+                    tracker.on_backspace();
                     state
                         .backspaces_since_boundary
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -50,13 +53,22 @@ pub fn start(state: Arc<AppState>) {
                     };
 
                     let word = std::mem::take(&mut buffer);
-                    let replacement = handle_boundary(&state, &word, separator);
-                    update_sentence_state(
-                        &state,
-                        &mut sentence_start,
+                    let replacement = if context::is_protected_context(
+                        last_boundary,
+                        separator,
+                        &word,
+                    ) {
+                        None
+                    } else {
+                        handle_boundary(&state, &word, separator)
+                    };
+                    let after_colon = state.config.read().capitalization.after_colon;
+                    tracker.on_boundary(
                         replacement.as_deref().unwrap_or(&word),
                         separator,
+                        after_colon,
                     );
+                    last_boundary = Some(separator);
 
                     if let Some(previous_line) = previous_line {
                         if let Some(marker) = continue_list(&state, &previous_line) {
@@ -67,11 +79,15 @@ pub fn start(state: Arc<AppState>) {
                 KeyEvent::Reset => {
                     buffer.clear();
                     line.clear();
+                    tracker.reset();
+                    last_boundary = None;
                     clear_boundary_session(&state);
                 }
                 KeyEvent::Shortcut => {
                     buffer.clear();
                     line.clear();
+                    tracker.reset();
+                    last_boundary = None;
                     clear_boundary_session(&state);
                 }
                 KeyEvent::Dictate(pressed) => {
@@ -87,7 +103,7 @@ pub fn start(state: Arc<AppState>) {
 fn handle_char(
     state: &Arc<AppState>,
     buffer: &mut String,
-    sentence_start: &mut bool,
+    capitalize: bool,
     ch: char,
 ) {
     if state.paused.load(std::sync::atomic::Ordering::Relaxed) {
@@ -111,7 +127,7 @@ fn handle_char(
             && config.capitalization.enabled
     };
 
-    if *sentence_start && capitalization_enabled && ch.is_lowercase() && ch.is_alphabetic() {
+    if capitalize && capitalization_enabled {
         let upper: String = ch.to_uppercase().collect();
         if state.activity.load(std::sync::atomic::Ordering::Relaxed) == expected
             && platform::replace_typed(1, &upper, None).is_ok()
@@ -120,14 +136,7 @@ fn handle_char(
             buffer.push_str(&upper);
             state.record_history("case", Some(&app_id), None, Some(&upper), None);
         }
-        *sentence_start = false;
-        return;
     }
-
-    if !ch.is_whitespace() {
-        *sentence_start = false;
-    }
-
 }
 
 fn handle_boundary(state: &Arc<AppState>, word: &str, separator: char) -> Option<String> {
@@ -206,15 +215,21 @@ fn handle_boundary(state: &Arc<AppState>, word: &str, separator: char) -> Option
         }
     }
 
+    let source_is_known = typo::language_of_word(word)
+        .map(|language| dictionary::dictionary().known(language, word))
+        .unwrap_or(false);
+    if context::has_inner_uppercase(word)
+        || (context::looks_like_proper_noun(word) && !source_is_known)
+    {
+        return None;
+    }
+
     let layout_decision = if layout_enabled {
         let config = state.config.read();
         layout::decide(word, &config.layout)
     } else {
         None
     };
-    let source_is_known = typo::language_of_word(word)
-        .map(|language| dictionary::dictionary().score(language, word) > 0.0)
-        .unwrap_or(false);
 
     if !source_is_known {
         if let Some(decision) = layout_decision.as_ref() {
@@ -413,24 +428,6 @@ fn apply_change(
     }
 
     true
-}
-
-fn update_sentence_state(
-    state: &AppState,
-    sentence_start: &mut bool,
-    word: &str,
-    separator: char,
-) {
-    let after_colon = state.config.read().capitalization.after_colon;
-    let abbreviation = rules::is_abbreviation(word);
-
-    *sentence_start = match separator {
-        '.' | '!' | '?' | '…' => !abbreviation,
-        '\n' => true,
-        ':' => after_colon,
-        ' ' => *sentence_start,
-        _ => false,
-    };
 }
 
 fn continue_list(state: &Arc<AppState>, previous_line: &str) -> Option<String> {

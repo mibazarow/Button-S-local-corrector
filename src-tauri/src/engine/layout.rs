@@ -176,19 +176,20 @@ pub fn decide(word: &str, layout: &Layout) -> Option<Decision> {
         return None;
     }
 
-    let source_score = dictionary::dictionary().score(source, word);
+    if dictionary::dictionary().known(source, word) {
+        return None;
+    }
     let target_score = dictionary::dictionary().score(target, &converted);
-    if target_score < 2.5 {
+    if target_score < 3.0 {
         return None;
     }
 
     let margin = 0.5 + layout.confidence_threshold * 1.5;
-    let difference = target_score - source_score;
-    if difference < margin {
+    if target_score < margin {
         return None;
     }
 
-    let confidence = 1.0 / (1.0 + (-(difference - margin)).exp());
+    let confidence = 1.0 / (1.0 + (-(target_score - margin)).exp());
     Some(Decision {
         text: converted,
         confidence,
