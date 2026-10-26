@@ -67,6 +67,9 @@ pub enum KeyEvent {
 #[cfg(target_os = "macos")]
 pub mod macos;
 
+#[cfg(target_os = "windows")]
+pub mod windows;
+
 #[cfg(target_os = "macos")]
 pub fn start_input_hook(sender: Sender<KeyEvent>, state: Arc<AppState>) {
     macos::hook::start(sender, state)
@@ -87,7 +90,7 @@ pub fn selection_info() -> Result<SelectionInfo, SelectionFailure> {
     macos::selection_info()
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn selection_info() -> Result<SelectionInfo, SelectionFailure> {
     Err(SelectionFailure {
         reason: "not supported".into(),
@@ -101,7 +104,7 @@ pub fn mouse_location() -> Option<(f64, f64)> {
     macos::mouse_location()
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn mouse_location() -> Option<(f64, f64)> {
     None
 }
@@ -116,7 +119,7 @@ pub fn frontmost_app_info() -> Option<RunningAppInfo> {
     macos::frontmost_app_info()
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn frontmost_app_info() -> Option<RunningAppInfo> {
     None
 }
@@ -126,7 +129,7 @@ pub fn browser_address_bar(bundle: &str) -> bool {
     macos::browser_address_bar(bundle)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn browser_address_bar(_bundle: &str) -> bool {
     false
 }
@@ -136,7 +139,7 @@ pub fn mouse_button_down() -> bool {
     macos::mouse_button_down()
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn mouse_button_down() -> bool {
     false
 }
@@ -146,7 +149,7 @@ pub fn activate_app(bundle_id: &str) -> bool {
     macos::activate_app(bundle_id)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn activate_app(_bundle_id: &str) -> bool {
     false
 }
@@ -181,7 +184,7 @@ pub fn copy_selection() -> Result<(), String> {
     macos::inject::copy_selection()
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn copy_selection() -> Result<(), String> {
     Err("not supported".into())
 }
@@ -191,12 +194,12 @@ pub fn paste() -> Result<(), String> {
     macos::inject::paste()
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn paste() -> Result<(), String> {
     Err("not supported".into())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn insert_text(_text: &str) -> Result<(), String> {
     Err("not supported".into())
 }
@@ -215,7 +218,7 @@ pub fn running_apps() -> Vec<RunningApp> {
     macos::apps::running_apps()
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn running_apps() -> Vec<RunningApp> {
     Vec::new()
 }
@@ -239,7 +242,7 @@ pub fn request_permissions() {
     });
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn request_permissions() {}
 
 #[cfg(target_os = "macos")]
@@ -247,47 +250,47 @@ pub fn open_permission_settings(kind: &str) -> Result<(), String> {
     macos::open_permission_settings(kind)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn start_input_hook(_sender: Sender<KeyEvent>, state: Arc<AppState>) {
     state.set_error(Some("BUTTON-S 0.1 supports macOS only".into()));
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn permissions() -> Permissions {
     Permissions::default()
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn ax_context(_max_before: usize) -> Option<AxContext> {
     None
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn frontmost_bundle_id() -> Option<String> {
     None
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn secure_input() -> bool {
     false
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn switch_layout(_language: &str) -> bool {
     false
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn language_for_text(_text: &str) -> Option<&'static str> {
     None
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn replace_text(_delete_count: usize, _text: &str) -> Result<(), String> {
     Err("not supported".into())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn replace_typed(
     _delete_count: usize,
     _text: &str,
@@ -296,7 +299,116 @@ pub fn replace_typed(
     Err("not supported".into())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn open_permission_settings(_kind: &str) -> Result<(), String> {
     Err("not supported".into())
+}
+
+#[cfg(target_os = "windows")]
+pub fn start_input_hook(sender: Sender<KeyEvent>, state: Arc<AppState>) {
+    windows::start(sender, state)
+}
+
+#[cfg(target_os = "windows")]
+pub fn permissions() -> Permissions {
+    windows::permissions()
+}
+
+#[cfg(target_os = "windows")]
+pub fn request_permissions() {
+    windows::request_permissions()
+}
+
+#[cfg(target_os = "windows")]
+pub fn ax_context(max_before: usize) -> Option<AxContext> {
+    windows::ax_context(max_before)
+}
+
+#[cfg(target_os = "windows")]
+pub fn selection_info() -> Result<SelectionInfo, SelectionFailure> {
+    windows::selection_info()
+}
+
+#[cfg(target_os = "windows")]
+pub fn mouse_location() -> Option<(f64, f64)> {
+    windows::mouse_location()
+}
+
+#[cfg(target_os = "windows")]
+pub fn frontmost_bundle_id() -> Option<String> {
+    windows::frontmost_bundle_id()
+}
+
+#[cfg(target_os = "windows")]
+pub fn frontmost_app_info() -> Option<RunningAppInfo> {
+    windows::frontmost_app_info()
+}
+
+#[cfg(target_os = "windows")]
+pub fn browser_address_bar(bundle: &str) -> bool {
+    windows::browser_address_bar(bundle)
+}
+
+#[cfg(target_os = "windows")]
+pub fn mouse_button_down() -> bool {
+    windows::mouse_button_down()
+}
+
+#[cfg(target_os = "windows")]
+pub fn activate_app(bundle_id: &str) -> bool {
+    windows::activate_app(bundle_id)
+}
+
+#[cfg(target_os = "windows")]
+pub fn secure_input() -> bool {
+    windows::secure_input()
+}
+
+#[cfg(target_os = "windows")]
+pub fn switch_layout(language: &str) -> bool {
+    windows::switch_layout(language)
+}
+
+#[cfg(target_os = "windows")]
+pub fn language_for_text(text: &str) -> Option<&'static str> {
+    windows::language_for_text(text)
+}
+
+#[cfg(target_os = "windows")]
+pub fn replace_text(delete_count: usize, text: &str) -> Result<(), String> {
+    windows::replace_text(delete_count, text)
+}
+
+#[cfg(target_os = "windows")]
+pub fn insert_text(text: &str) -> Result<(), String> {
+    windows::insert_text(text)
+}
+
+#[cfg(target_os = "windows")]
+pub fn copy_selection() -> Result<(), String> {
+    windows::copy_selection()
+}
+
+#[cfg(target_os = "windows")]
+pub fn paste() -> Result<(), String> {
+    windows::paste()
+}
+
+#[cfg(target_os = "windows")]
+pub fn replace_typed(
+    delete_count: usize,
+    text: &str,
+    separator: Option<char>,
+) -> Result<(), String> {
+    windows::replace_typed(delete_count, text, separator)
+}
+
+#[cfg(target_os = "windows")]
+pub fn running_apps() -> Vec<RunningApp> {
+    windows::running_apps()
+}
+
+#[cfg(target_os = "windows")]
+pub fn open_permission_settings(_kind: &str) -> Result<(), String> {
+    windows::open_permission_settings(_kind)
 }

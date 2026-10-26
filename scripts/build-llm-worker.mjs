@@ -16,8 +16,9 @@ execFileSync(
   { stdio: "inherit" },
 );
 
-const source = join("src-tauri", "target", "release", "button-s-llm");
-const destination = join("src-tauri", "binaries", `button-s-llm-${host}`);
+const suffix = process.platform === "win32" ? ".exe" : "";
+const source = join("src-tauri", "target", "release", `button-s-llm${suffix}`);
+const destination = join("src-tauri", "binaries", `button-s-llm-${host}${suffix}`);
 mkdirSync(dirname(destination), { recursive: true });
 copyFileSync(source, destination);
 console.log(`llm worker -> ${destination}`);

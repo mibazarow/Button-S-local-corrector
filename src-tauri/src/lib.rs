@@ -50,7 +50,6 @@ fn create_aux_windows(app: &tauri::AppHandle) -> tauri::Result<()> {
         .visible(false)
         .build()?;
 
-    #[cfg(target_os = "macos")]
     WebviewWindowBuilder::new(
         app,
         "selection",
