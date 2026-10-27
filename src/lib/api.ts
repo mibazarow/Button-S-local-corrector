@@ -16,6 +16,7 @@ export interface Settings {
   historyText: boolean;
   onboardingDone: boolean;
   voiceEnabled: boolean;
+  checkUpdates: boolean;
 }
 
 export interface Permissions {
@@ -34,6 +35,15 @@ export interface AppState {
   settings: Settings;
   lastError: string | null;
   dataDir: string;
+}
+
+export interface UpdateInfo {
+  current: string;
+  latest: string | null;
+  url: string | null;
+  available: boolean;
+  checkedAt: number;
+  cached: boolean;
 }
 
 export interface ConversionResult {
@@ -328,6 +338,8 @@ export const api = {
   selectionHide: () => invoke<void>("selection_hide"),
   selectionPrompt: (id: string) => invoke<void>("selection_prompt", { id }),
   openPromptEditor: () => invoke<void>("open_prompt_editor"),
+  checkUpdate: () => invoke<UpdateInfo>("check_update"),
+  openExternal: (url: string) => invoke<void>("open_external", { url }),
   diagnostics: () => invoke<string>("diagnostics"),
   exportDiagnostics: (path: string) =>
     invoke<string>("export_diagnostics", { path }),

@@ -124,6 +124,9 @@ pub fn update_settings(
         }
     }
 
+    if !state.config.read().general.check_updates {
+        crate::update::forget();
+    }
     hotkeys::register(&app, &state);
     state.emit_state();
     tray::refresh(&app, &state);

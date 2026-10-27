@@ -3,7 +3,7 @@ members = ["llm-worker"]
 
 [package]
 name = "button-s"
-version = "1.0.0"
+version = "1.2.0"
 description = "BUTTON-S — input accelerator for macOS"
 edition = "2021"
 rust-version = "1.90"

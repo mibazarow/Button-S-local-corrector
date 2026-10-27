@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -431,22 +431,38 @@ pub fn is_modifier_only_combo(combo: &str) -> bool {
     matches!(combo, "ShiftLeft" | "ShiftRight")
 }
 
-pub fn default_hotkeys() -> BTreeMap<String, String> {
-    let command = if cfg!(target_os = "macos") {
-        "Command"
-    } else {
-        "Control"
+fn migrate_hotkey_value(combo: &str) -> String {
+    let combo = match combo.strip_prefix("Command+") {
+        Some(rest) => format!("Control+{rest}"),
+        None => combo.to_string(),
     };
+    match combo.as_str() {
+        "Control+KeyM" => "Control+Alt+KeyM".to_string(),
+        "Control+Alt+Shift+KeyT" => "Control+Alt+KeyR".to_string(),
+        _ => combo,
+    }
+}
+
+/// Приводит хоткеи к единой схеме Control+Alt+буква на всех платформах.
+fn migrate_v4_to_v5(config: &mut Config) {
+    for combo in config.hotkeys.values_mut() {
+        *combo = migrate_hotkey_value(combo);
+    }
+    config.voice.hotkey = migrate_hotkey_value(&config.voice.hotkey);
+    config.schema_version = 5;
+}
+
+pub fn default_hotkeys() -> BTreeMap<String, String> {
     [
-        ("convertLastWord", format!("{command}+Alt+KeyZ")),
-        ("convertSelection", format!("{command}+Alt+KeyL")),
-        ("undoFix", format!("{command}+Alt+Backspace")),
+        ("convertLastWord", "Control+Alt+KeyZ".into()),
+        ("convertSelection", "Control+Alt+KeyL".into()),
+        ("undoFix", "Control+Alt+Backspace".into()),
         ("dictate", "ShiftRight".into()),
-        ("translateRuEn", format!("{command}+Alt+KeyT")),
-        ("translateEnRu", format!("{command}+Alt+Shift+KeyT")),
-        ("pauseAll", format!("{command}+Alt+KeyP")),
-        ("llmFix", format!("{command}+Alt+KeyF")),
-        ("selectionMenu", "Control+KeyM".into()),
+        ("translateRuEn", "Control+Alt+KeyT".into()),
+        ("translateEnRu", "Control+Alt+KeyR".into()),
+        ("pauseAll", "Control+Alt+KeyP".into()),
+        ("llmFix", "Control+Alt+KeyF".into()),
+        ("selectionMenu", "Control+Alt+KeyM".into()),
     ]
     .into_iter()
     .map(|(key, value)| (key.to_string(), value))
@@ -495,6 +511,7 @@ pub struct SettingsPatch {
     pub history_enabled: Option<bool>,
     pub history_text: Option<bool>,
     pub onboarding_done: Option<bool>,
+    pub check_updates: Option<bool>,
 }
 
 impl Config {
@@ -516,6 +533,9 @@ impl Config {
                     }
                     if config.schema_version < 4 {
                         migrate_v3_to_v4(&mut config);
+                    }
+                    if config.schema_version < 5 {
+                        migrate_v4_to_v5(&mut config);
                     }
                     config.normalize();
                     if migrated {
@@ -582,11 +602,14 @@ impl Config {
         if self
             .hotkeys
             .get("dictate")
-            .is_some_and(|value| value == "Command+Alt+Space")
+            .is_some_and(|value| value == "Command+Alt+Space" || value == "Control+Alt+Space")
         {
             self.hotkeys.insert("dictate".into(), "ShiftRight".into());
         }
-        if self.voice.hotkey.is_empty() || self.voice.hotkey == "Command+Alt+Space" {
+        if self.voice.hotkey.is_empty()
+            || self.voice.hotkey == "Command+Alt+Space"
+            || self.voice.hotkey == "Control+Alt+Space"
+        {
             self.voice.hotkey = self
                 .hotkeys
                 .get("dictate")
@@ -670,6 +693,9 @@ impl Config {
         }
         if let Some(done) = patch.onboarding_done {
             self.general.onboarding_done = done;
+        }
+        if let Some(enabled) = patch.check_updates {
+            self.general.check_updates = enabled;
         }
     }
 
@@ -780,19 +806,39 @@ mod tests {
     #[test]
     fn default_dictation_is_right_shift() {
         assert_eq!(default_hotkeys()["dictate"], "ShiftRight");
-        assert_eq!(default_hotkeys()["selectionMenu"], "Control+KeyM");
-        let command = if cfg!(target_os = "macos") {
-            "Command"
-        } else {
-            "Control"
-        };
-        assert_eq!(
-            default_hotkeys()["convertLastWord"],
-            format!("{command}+Alt+KeyZ")
-        );
+        assert_eq!(default_hotkeys()["selectionMenu"], "Control+Alt+KeyM");
+        assert_eq!(default_hotkeys()["convertLastWord"], "Control+Alt+KeyZ");
+        assert_eq!(default_hotkeys()["translateEnRu"], "Control+Alt+KeyR");
+        assert!(default_hotkeys()
+            .values()
+            .all(|combo| !combo.starts_with("Command+")));
         assert_eq!(Voice::default().hotkey, "ShiftRight");
         assert!(is_modifier_only_combo("ShiftRight"));
         assert!(!is_modifier_only_combo("Command+Alt+Space"));
+    }
+
+    #[test]
+    fn migrate_v4_to_v5_unifies_control_hotkeys() {
+        let mut config = Config {
+            schema_version: 4,
+            ..Config::default()
+        };
+        config
+            .hotkeys
+            .insert("convertLastWord".into(), "Command+Alt+KeyZ".into());
+        config
+            .hotkeys
+            .insert("selectionMenu".into(), "Control+KeyM".into());
+        config
+            .hotkeys
+            .insert("translateEnRu".into(), "Control+Alt+Shift+KeyT".into());
+
+        migrate_v4_to_v5(&mut config);
+
+        assert_eq!(config.schema_version, 5);
+        assert_eq!(config.hotkeys["convertLastWord"], "Control+Alt+KeyZ");
+        assert_eq!(config.hotkeys["selectionMenu"], "Control+Alt+KeyM");
+        assert_eq!(config.hotkeys["translateEnRu"], "Control+Alt+KeyR");
     }
 
     #[test]

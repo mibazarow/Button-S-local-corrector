@@ -11,6 +11,7 @@ mod selection;
 mod state;
 pub mod suggestion;
 mod tray;
+mod update;
 mod user_dict;
 mod voice;
 
@@ -22,6 +23,28 @@ use tauri_plugin_global_shortcut::ShortcutState;
 
 use config::Config;
 use state::AppState;
+
+fn internal_url(url: &tauri::Url) -> bool {
+    match url.scheme() {
+        "tauri" => true,
+        "http" | "https" => matches!(url.host_str(), Some("tauri.localhost") | Some("localhost")),
+        _ => false,
+    }
+}
+
+fn guard_navigation(url: &tauri::Url) -> bool {
+    if internal_url(url) {
+        return true;
+    }
+    let _ = crate::platform::open_url(url.as_str());
+    false
+}
+
+fn external_links_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri::plugin::Builder::new("external-links")
+        .on_navigation(|_, url| guard_navigation(url))
+        .build()
+}
 
 fn create_aux_windows(app: &tauri::AppHandle) -> tauri::Result<()> {
     WebviewWindowBuilder::new(
@@ -35,6 +58,7 @@ fn create_aux_windows(app: &tauri::AppHandle) -> tauri::Result<()> {
     .visible(false)
     .always_on_top(true)
     .skip_taskbar(true)
+    .on_navigation(guard_navigation)
     .build()?;
 
     #[cfg(target_os = "macos")]
@@ -48,6 +72,7 @@ fn create_aux_windows(app: &tauri::AppHandle) -> tauri::Result<()> {
         .skip_taskbar(true)
         .focused(false)
         .visible(false)
+        .on_navigation(guard_navigation)
         .build()?;
 
     WebviewWindowBuilder::new(
@@ -66,6 +91,7 @@ fn create_aux_windows(app: &tauri::AppHandle) -> tauri::Result<()> {
     .focused(false)
     .resizable(false)
     .visible(false)
+    .on_navigation(guard_navigation)
     .build()?;
 
     Ok(())
@@ -79,6 +105,7 @@ pub fn run() {
     .try_init();
 
     tauri::Builder::default()
+        .plugin(external_links_plugin())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             tray::show_settings(app);
@@ -160,6 +187,8 @@ pub fn run() {
             commands::add_selection_word,
             commands::diagnostics,
             commands::export_diagnostics,
+            update::check_update,
+            update::open_external,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -202,6 +231,7 @@ pub fn run() {
             platform::request_permissions();
             hotkeys::register(&handle, &state);
             voice::preload(&handle, &state);
+            update::spawn_check(handle.clone(), state.clone());
 
             if std::env::args().any(|argument| argument == "--settings") {
                 tray::show_settings(&handle);

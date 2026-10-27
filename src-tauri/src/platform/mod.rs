@@ -250,6 +250,11 @@ pub fn open_permission_settings(kind: &str) -> Result<(), String> {
     macos::open_permission_settings(kind)
 }
 
+#[cfg(target_os = "macos")]
+pub fn open_url(url: &str) -> Result<(), String> {
+    macos::open_url(url)
+}
+
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn start_input_hook(_sender: Sender<KeyEvent>, state: Arc<AppState>) {
     state.set_error(Some("BUTTON-S 0.1 supports macOS only".into()));
@@ -301,6 +306,11 @@ pub fn replace_typed(
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn open_permission_settings(_kind: &str) -> Result<(), String> {
+    Err("not supported".into())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub fn open_url(_url: &str) -> Result<(), String> {
     Err("not supported".into())
 }
 
@@ -411,4 +421,9 @@ pub fn running_apps() -> Vec<RunningApp> {
 #[cfg(target_os = "windows")]
 pub fn open_permission_settings(_kind: &str) -> Result<(), String> {
     windows::open_permission_settings(_kind)
+}
+
+#[cfg(target_os = "windows")]
+pub fn open_url(url: &str) -> Result<(), String> {
+    windows::open_url(url)
 }

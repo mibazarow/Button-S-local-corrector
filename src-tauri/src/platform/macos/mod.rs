@@ -501,6 +501,14 @@ pub fn open_permission_settings(kind: &str) -> Result<(), String> {
     permissions::open_settings(kind)
 }
 
+pub fn open_url(url: &str) -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg(url)
+        .status()
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

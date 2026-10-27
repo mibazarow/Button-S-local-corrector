@@ -180,16 +180,24 @@ pub fn decide(word: &str, layout: &Layout) -> Option<Decision> {
         return None;
     }
     let target_score = dictionary::dictionary().score(target, &converted);
-    if target_score < 3.0 {
+    let known_fallback = target == "ru" && dictionary::dictionary().known(target, &converted);
+    if target_score < 3.0 && !known_fallback {
         return None;
     }
 
     let margin = 0.5 + layout.confidence_threshold * 1.5;
-    if target_score < margin {
+    let confidence = if target_score >= margin {
+        let base = 1.0 / (1.0 + (-(target_score - margin)).exp());
+        if known_fallback {
+            base.max(0.8)
+        } else {
+            base
+        }
+    } else if known_fallback {
+        0.8
+    } else {
         return None;
-    }
-
-    let confidence = 1.0 / (1.0 + (-(target_score - margin)).exp());
+    };
     Some(Decision {
         text: converted,
         confidence,
@@ -283,6 +291,13 @@ mod tests {
     fn converts_capitalized_wrong_layout_word() {
         let decision = decide("Ghbdtn", &layout()).expect("capitalized layout conversion");
         assert_eq!(decision.text, "Привет");
+    }
+
+    #[test]
+    fn converts_names_known_only_in_large_dictionary() {
+        let decision = decide("Vbif", &layout()).expect("name layout conversion");
+        assert_eq!(decision.text, "Миша");
+        assert!(decision.confidence >= 0.7);
     }
 
     #[test]

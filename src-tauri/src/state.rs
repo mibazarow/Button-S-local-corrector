@@ -30,6 +30,13 @@ pub struct SelectionCapture {
     pub at: Instant,
 }
 
+#[derive(Clone)]
+pub struct BlockedWord {
+    pub word: String,
+    pub candidate: Option<String>,
+    pub at: Instant,
+}
+
 pub struct LastChange {
     pub original: String,
     pub replacement: String,
@@ -66,7 +73,7 @@ pub struct AppState {
     pub mouse_drag_start: Mutex<Option<(f64, f64)>>,
     pub mouse_dragged: AtomicBool,
     pub layout_corrections: Mutex<HashMap<String, Instant>>,
-    pub last_blocked_word: Mutex<Option<(String, Instant)>>,
+    pub last_blocked_word: Mutex<Option<BlockedWord>>,
     pub backspaces_since_boundary: AtomicU32,
     app: RwLock<Option<AppHandle>>,
 }
@@ -87,6 +94,7 @@ pub struct SettingsView {
     pub history_text: bool,
     pub onboarding_done: bool,
     pub voice_enabled: bool,
+    pub check_updates: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -217,6 +225,7 @@ impl AppState {
                 history_text: config.privacy.history_text,
                 onboarding_done: config.general.onboarding_done,
                 voice_enabled: config.voice.enabled,
+                check_updates: config.general.check_updates,
             },
             last_error: self.last_error.read().clone(),
             data_dir,
@@ -287,6 +296,10 @@ impl AppState {
         repeated
     }
 
+    pub fn forget_layout_correction(&self, word: &str) {
+        self.layout_corrections.lock().remove(&normalize(word));
+    }
+
     pub fn switch_layout(&self, language: &str) {
         let language = language.to_string();
         let app = self.app.read().as_ref().cloned();
@@ -338,5 +351,25 @@ impl AppState {
         if let Some(connection) = self.history.lock().as_ref() {
             let _ = history::record(connection, kind, app_id, before, after, meta);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn forgetting_layout_correction_restarts_the_chain() {
+        let dir = std::env::temp_dir().join(format!("button-s-state-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let state = AppState::new(Config::default(), dir.join("config.json"));
+
+        assert!(!state.note_layout_correction("Vbif"));
+        assert!(state.note_layout_correction("Vbif"));
+        state.forget_layout_correction("Vbif");
+        assert!(!state.note_layout_correction("Vbif"));
+        assert!(!state.note_layout_correction(""));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use crate::config::Feature;
 use crate::platform::{self, KeyEvent};
-use crate::state::{AppState, ChangeKind};
+use crate::state::{AppState, BlockedWord, ChangeKind};
 use crate::user_dict::normalize;
 
 pub fn start(state: Arc<AppState>) {
@@ -258,6 +258,7 @@ fn handle_boundary(state: &Arc<AppState>, word: &str, separator: char) -> Option
         }
     }
 
+    let mut blocked_typo: Option<String> = None;
     if typos_enabled && typo_mode != "off" {
         if let Some(language) = typo::language_of_word(word) {
             let stopped = {
@@ -269,11 +270,13 @@ fn handle_boundary(state: &Arc<AppState>, word: &str, separator: char) -> Option
             };
             if !stopped {
                 if let Some(suggestion) = typo::suggest(word, language, typo_distance) {
-                    if !state
+                    if state
                         .user_dict
                         .read()
                         .is_stopped(word, &suggestion.text)
                     {
+                        blocked_typo = Some(suggestion.text);
+                    } else {
                         if typo_mode == "auto"
                             && typo::is_confident(suggestion.distance, suggestion.confidence)
                         {
@@ -327,6 +330,14 @@ fn handle_boundary(state: &Arc<AppState>, word: &str, separator: char) -> Option
         }
     }
 
+    if let Some(candidate) = blocked_typo {
+        *state.last_blocked_word.lock() = Some(BlockedWord {
+            word: word.to_string(),
+            candidate: Some(candidate),
+            at: Instant::now(),
+        });
+    }
+
     None
 }
 
@@ -338,21 +349,36 @@ fn clear_boundary_session(state: &AppState) {
 }
 
 fn note_boundary_replacement(state: &Arc<AppState>, word: &str, user_protected: bool) {
+    const STALE: Duration = Duration::from_secs(30 * 60);
+
     let previous = state.last_blocked_word.lock().clone();
     let backspaces = state
         .backspaces_since_boundary
         .swap(0, std::sync::atomic::Ordering::Relaxed);
 
-    if let Some((previous_word, _)) = previous {
-        let still_known = state.user_dict.read().contains(&previous_word);
-        if let Some(candidate) =
-            dict_removal_candidate(Some(&previous_word), still_known, backspaces, word)
-        {
-            crate::suggestion::note_dict_replacement(state, &candidate);
+    if let Some(previous) = previous.filter(|previous| previous.at.elapsed() <= STALE) {
+        let still_known = state.user_dict.read().contains(&previous.word);
+        match previous.candidate.as_deref() {
+            Some(candidate) => {
+                if backspaces > 0 && normalize(word) == normalize(candidate) {
+                    crate::suggestion::note_stop_pair_revert(state, &previous.word, candidate);
+                }
+            }
+            None => {
+                if let Some(candidate) =
+                    dict_removal_candidate(Some(&previous.word), still_known, backspaces, word)
+                {
+                    crate::suggestion::note_dict_replacement(state, &candidate);
+                }
+            }
         }
     }
 
-    *state.last_blocked_word.lock() = user_protected.then(|| (word.to_string(), Instant::now()));
+    *state.last_blocked_word.lock() = user_protected.then(|| BlockedWord {
+        word: word.to_string(),
+        candidate: None,
+        at: Instant::now(),
+    });
 }
 
 pub fn dict_removal_candidate(
@@ -363,6 +389,12 @@ pub fn dict_removal_candidate(
 ) -> Option<String> {
     let previous = previous?;
     if !previous_in_dict || backspaces == 0 || normalize(previous) == normalize(word) {
+        return None;
+    }
+    let source = layout::language_of(previous)?;
+    let target = if source == "ru" { "en" } else { "ru" };
+    let converted = layout::convert_word(previous, target);
+    if normalize(&converted) != normalize(word) {
         return None;
     }
     Some(previous.to_string())
@@ -485,7 +517,7 @@ pub fn correction_plan(word: &str, separator: char, replacement: &str) -> (usize
     (delete_count, format!("{replacement}{separator}"))
 }
 
-pub fn convert_last_word(state: &AppState) {
+pub fn convert_last_word(state: &Arc<AppState>) {
     if state.paused.load(std::sync::atomic::Ordering::Relaxed) || platform::secure_input() {
         return;
     }
@@ -544,6 +576,10 @@ pub fn convert_last_word(state: &AppState) {
         Some("manual"),
     );
 
+    if state.user_dict.read().contains(&word) {
+        crate::suggestion::note_dict_replacement(state, &word);
+    }
+
     log::info!("manual layout conversion applied");
 }
 
@@ -578,6 +614,7 @@ pub fn undo_last(state: &Arc<AppState>) {
 
     if change.kind == ChangeKind::Layout {
         crate::suggestion::note_layout_revert(state, &change.from);
+        state.forget_layout_correction(&change.from);
     }
 
     if state.user_dict.read().contains(&change.to) {
@@ -621,19 +658,27 @@ mod tests {
     #[test]
     fn detects_dictionary_word_replacement_after_deletion() {
         assert_eq!(
-            dict_removal_candidate(Some("Клавиатура"), true, 1, "мышь"),
+            dict_removal_candidate(Some("Vbif"), true, 1, "Миша"),
+            Some("Vbif".to_string())
+        );
+        assert_eq!(
+            dict_removal_candidate(Some("Клавиатура"), true, 1, "Rkfdbfnehf"),
             Some("Клавиатура".to_string())
         );
         assert_eq!(
-            dict_removal_candidate(Some("Клавиатура"), true, 0, "мышь"),
+            dict_removal_candidate(Some("Vbif"), true, 0, "Миша"),
             None
         );
         assert_eq!(
-            dict_removal_candidate(Some("Клавиатура"), false, 1, "мышь"),
+            dict_removal_candidate(Some("Vbif"), false, 1, "Миша"),
             None
         );
         assert_eq!(
-            dict_removal_candidate(Some("Клавиатура"), true, 1, "КЛАВИАТУРА"),
+            dict_removal_candidate(Some("Vbif"), true, 1, "МИША"),
+            Some("Vbif".to_string())
+        );
+        assert_eq!(
+            dict_removal_candidate(Some("Vbif"), true, 1, "мышь"),
             None
         );
         assert_eq!(dict_removal_candidate(None, true, 1, "мышь"), None);

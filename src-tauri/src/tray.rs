@@ -56,6 +56,12 @@ pub fn create(app: &AppHandle, state: &AppState) -> tauri::Result<()> {
                 "typos" => toggle(&state, |config| &mut config.typos.enabled),
                 "voice" => toggle(&state, |config| &mut config.voice.enabled),
                 "settings" => show_settings(app),
+                "update" => {
+                    let url = crate::update::available()
+                        .and_then(|info| info.url)
+                        .unwrap_or_else(|| crate::update::RELEASES_URL.to_string());
+                    let _ = crate::platform::open_url(&url);
+                }
                 "quit" => app.exit(0),
                 _ => {}
             }
@@ -132,6 +138,14 @@ fn build_menu(app: &AppHandle, state: &AppState) -> tauri::Result<Menu<Wry>> {
         true,
         None::<&str>,
     )?;
+    let update_label = match crate::update::available().and_then(|info| info.latest) {
+        Some(latest) if english => format!("Version {latest} is available"),
+        Some(latest) => format!("Доступна версия {latest}"),
+        None if english => "Releases on GitVerse".to_string(),
+        None => "Релизы на GitVerse".to_string(),
+    };
+    let update_item = MenuItem::with_id(app, "update", update_label, true, None::<&str>)?;
+
     let quit_item = MenuItem::with_id(
         app,
         "quit",
@@ -155,6 +169,7 @@ fn build_menu(app: &AppHandle, state: &AppState) -> tauri::Result<Menu<Wry>> {
             &voice_item,
             &separator_two,
             &settings_item,
+            &update_item,
             &separator_three,
             &quit_item,
         ],

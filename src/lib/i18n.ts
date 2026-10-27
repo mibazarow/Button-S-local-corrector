@@ -60,6 +60,9 @@ const ru = {
   autoSwitch: "Переключать раскладку автоматически",
   notify: "Уведомлять о заменах",
   autostart: "Запускать при входе",
+  checkUpdates: "Проверять обновления",
+  checkUpdatesHint:
+    "Раз в 8 часов приложение смотрит страницу релизов GitVerse. Ничего, кроме версии, не отправляется.",
   voice: "Голосовой ввод",
   voiceRecording: "Идёт запись…",
   voiceModelReady: "Модель готова",
@@ -400,6 +403,12 @@ const ru = {
   quit: "Выйти",
   dataHint:
     "Приложение работает в строке меню. Настройки открываются из меню или повторным запуском. Телеметрия отсутствует.",
+  creditsDev: "Разработка:",
+  creditsSupport: "Поддержать проект",
+  updateTitle: "Доступна новая версия BUTTON-S {version}",
+  updateText: "Установите её поверх текущей — настройки, словари и модели сохранятся.",
+  updateOpen: "Открыть релиз",
+  updateDismiss: "Скрыть уведомление",
 };
 
 export type Strings = typeof ru;
@@ -464,6 +473,9 @@ const en: Strings = {
   autoSwitch: "Switch keyboard layout automatically",
   notify: "Notify about corrections",
   autostart: "Launch at login",
+  checkUpdates: "Check for updates",
+  checkUpdatesHint:
+    "Every 8 hours the app reads the GitVerse releases page. Nothing but the version is sent.",
   voice: "Voice input",
   voiceRecording: "Recording…",
   voiceModelReady: "Model ready",
@@ -801,12 +813,18 @@ const en: Strings = {
   quit: "Quit",
   dataHint:
     "The app lives in the menu bar. Open settings from the menu or by relaunching. No telemetry.",
+  creditsDev: "Made by",
+  creditsSupport: "Support the project",
+  updateTitle: "BUTTON-S {version} is available",
+  updateText: "Install it over the current version — settings, dictionaries and models are kept.",
+  updateOpen: "Open release",
+  updateDismiss: "Hide notification",
 };
 
 export const strings: Record<Language, Strings> = { ru, en };
 
 /** Форматирует строку с плейсхолдерами {name}. */
-/** Превращает «Command+Alt+KeyZ» в «⌥⌘Z» для отображения. */
+/** Превращает «Control+Alt+KeyZ» в «Ctrl+Alt+Z» для отображения. */
 export function prettyCombo(combo: string): string {
   if (!combo) return "—";
   return combo
@@ -814,24 +832,24 @@ export function prettyCombo(combo: string): string {
     .map((part) => {
       switch (part) {
         case "Command":
-          return "⌘";
+          return "Cmd";
         case "Alt":
-          return "⌥";
+          return "Alt";
         case "Control":
-          return "⌃";
+          return "Ctrl";
         case "Shift":
-          return "⇧";
+          return "Shift";
         case "ShiftRight":
-          return "⇧ Right";
+          return "RShift";
         case "ShiftLeft":
-          return "⇧ Left";
+          return "LShift";
+        case "Backspace":
+          return "Backspace";
+        case "Space":
+          return "Space";
         default:
-          return part
-            .replace(/^Key/, "")
-            .replace(/^Digit/, "")
-            .replace("Backspace", "⌫")
-            .replace("Space", "Space");
+          return part.replace(/^Key/, "").replace(/^Digit/, "");
       }
     })
-    .join(" ");
+    .join("+");
 }

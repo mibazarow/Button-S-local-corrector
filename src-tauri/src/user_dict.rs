@@ -14,6 +14,7 @@ pub struct UserDictionaryFile {
     pub undo_counts: BTreeMap<String, u32>,
     pub layout_reverts: BTreeMap<String, u32>,
     pub dict_replacements: BTreeMap<String, u32>,
+    pub stop_pair_reverts: BTreeMap<String, u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +50,7 @@ impl Default for UserDictionaryFile {
             undo_counts: BTreeMap::new(),
             layout_reverts: BTreeMap::new(),
             dict_replacements: BTreeMap::new(),
+            stop_pair_reverts: BTreeMap::new(),
         }
     }
 }
@@ -206,10 +208,29 @@ impl UserDictionaryFile {
         let key = format!("{}>{}", normalize(from), normalize(to));
         let count = self.undo_counts.entry(key).or_insert(0);
         *count += 1;
-        if *count >= 2 && !self.is_stopped(from, to) {
+        if *count >= SUGGEST_THRESHOLD && !self.is_stopped(from, to) {
             self.stop_pairs
                 .push((from.to_string(), to.to_string()));
         }
+    }
+
+    pub fn remove_stop_pair(&mut self, from: &str, to: &str) -> bool {
+        let before = self.stop_pairs.len();
+        self.stop_pairs.retain(|(left, right)| {
+            !(normalize(left) == normalize(from) && normalize(right) == normalize(to))
+        });
+        self.undo_counts
+            .remove(&format!("{}>{}", normalize(from), normalize(to)));
+        self.stop_pair_reverts
+            .remove(&format!("{}>{}", normalize(from), normalize(to)));
+        self.stop_pairs.len() != before
+    }
+
+    pub fn note_stop_pair_revert(&mut self, from: &str, to: &str) -> bool {
+        note_threshold(
+            &mut self.stop_pair_reverts,
+            &format!("{}>{}", normalize(from), normalize(to)),
+        )
     }
 
     pub fn note_layout_revert(&mut self, word: &str) -> bool {
@@ -341,6 +362,27 @@ mod tests {
 
         file.clear_dict_replacement("мышка");
         assert!(!file.note_dict_replacement("мышка"));
+    }
+
+    #[test]
+    fn typo_stop_pair_needs_three_undos_and_can_be_removed() {
+        let mut file = UserDictionaryFile::default();
+
+        file.count_undo("превет", "привет");
+        file.count_undo("превет", "привет");
+        assert!(!file.is_stopped("превет", "привет"));
+
+        file.count_undo("превет", "привет");
+        assert!(file.is_stopped("превет", "привет"));
+
+        assert!(!file.note_stop_pair_revert("превет", "привет"));
+        assert!(!file.note_stop_pair_revert("Превет", "Привет"));
+        assert!(file.note_stop_pair_revert("ПРЕВЕТ", "ПРИВЕТ"));
+
+        assert!(file.remove_stop_pair("превет", "привет"));
+        assert!(!file.is_stopped("превет", "привет"));
+        assert!(!file.undo_counts.contains_key("превет>привет"));
+        assert!(file.stop_pair_reverts.is_empty());
     }
 
     #[test]

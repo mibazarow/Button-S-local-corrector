@@ -21,6 +21,8 @@
   import AppsTab from "./components/AppsTab.svelte";
   import AiTab from "./components/AiTab.svelte";
   import HotkeysTab from "./components/HotkeysTab.svelte";
+  import UpdateBanner from "./components/UpdateBanner.svelte";
+  import { installExternalLinks } from "./lib/external";
   import Toggle from "./lib/Toggle.svelte";
 
   const view = window.location.hash.replace("#", "") || "main";
@@ -71,6 +73,10 @@
     { id: "ai", icon: "ai", label: t.tabAi },
     { id: "hotkeys", icon: "hotkeys", label: t.tabHotkeys },
   ]);
+
+  function openExternal(url: string) {
+    void api.openExternal(url).catch(() => {});
+  }
 
   async function refresh() {
     try {
@@ -151,6 +157,7 @@
   }
 
   onMount(() => {
+    installExternalLinks();
     if (view === "hud" || view === "selection") {
       document.body.style.background = "transparent";
     }
@@ -222,9 +229,20 @@
           <span class="version">v{snapshot.version}</span>
         {/if}
       </div>
+
+      <div class="credits">
+        <span class="credits-dev">
+          {t.creditsDev}
+          <button class="credits-link" onclick={() => openExternal("https://bazarow.ru/")}>bazarow.ru</button>
+        </span>
+        <button class="credits-support" onclick={() => openExternal("https://www.donationalerts.com/r/bazarow_ru")}>
+          {t.creditsSupport}
+        </button>
+      </div>
     </aside>
 
     <section class="content">
+      <UpdateBanner {lang} />
       {#if loading}
         <div class="card placeholder">…</div>
       {:else if loadError}
@@ -345,6 +363,11 @@
               <span class="row-title">{t.autostart}</span>
               <Toggle checked={snapshot.settings.autostart} label={t.autostart} onchange={(value) => patch({ autostart: value })} />
             </div>
+            <div class="row">
+              <span class="row-title">{t.checkUpdates}</span>
+              <Toggle checked={snapshot.settings.checkUpdates} label={t.checkUpdates} onchange={(value) => patch({ checkUpdates: value })} />
+            </div>
+            <p class="hint">{t.checkUpdatesHint}</p>
           </section>
 
           <section class="card">

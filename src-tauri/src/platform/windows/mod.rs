@@ -41,6 +41,14 @@ pub fn open_permission_settings(_kind: &str) -> Result<(), String> {
     Err("Windows does not use per-app permission panes".into())
 }
 
+pub fn open_url(url: &str) -> Result<(), String> {
+    std::process::Command::new("cmd")
+        .args(["/C", "start", "", url])
+        .status()
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 pub fn ax_context(max_before: usize) -> Option<AxContext> {
     uia::context(max_before)
 }

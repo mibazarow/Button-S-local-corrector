@@ -151,14 +151,13 @@ impl PromptStore {
                     existing.template = builtin.template;
                     existing.description = builtin.description;
                     existing.output = builtin.output;
-                    if cfg!(not(target_os = "macos"))
-                        && existing.hotkey.starts_with("Command+")
-                    {
-                        existing.hotkey =
-                            existing.hotkey.replacen("Command", "Control", 1);
-                    }
                 }
                 None => store.prompts.push(builtin),
+            }
+        }
+        for prompt in &mut store.prompts {
+            if prompt.hotkey.starts_with("Command+") {
+                prompt.hotkey = prompt.hotkey.replacen("Command", "Control", 1);
             }
         }
         store
@@ -201,11 +200,6 @@ impl PromptStore {
 }
 
 pub fn builtin_prompts() -> Vec<Prompt> {
-    let command = if cfg!(target_os = "macos") {
-        "Command"
-    } else {
-        "Control"
-    };
     [
         (
             "fix-grammar",
@@ -257,7 +251,7 @@ pub fn builtin_prompts() -> Vec<Prompt> {
                 template: template.into(),
                 note: String::new(),
                 hotkey: if id == "fix-grammar" {
-                    format!("{command}+Alt+KeyF")
+                    "Control+Alt+KeyF".into()
                 } else {
                     hotkey.into()
                 },
@@ -787,9 +781,31 @@ const LEADING_META_INTROS: &[&str] = &["конечно!", "sure!", "sure.", "cer
 
 const TRAILING_META_PREFIXES: &[&str] = &[
     "если нужно",
-    "if you need",
+    "если хотите",
+    "если вам",
+    "если у вас",
+    "если пожелаете",
+    "дайте знать",
+    "обращайтесь",
+    "могу ",
+    "могу,",
+    "могу.",
+    "хотите",
     "надеюсь",
+    "if you need",
+    "if you'd like",
+    "if you would like",
+    "if you want",
     "let me know",
+    "would you like",
+    "i can ",
+    "i could ",
+    "i hope",
+    "i'd be happy",
+    "i would be happy",
+    "hope this",
+    "feel free",
+    "happy to",
 ];
 
 const QUOTE_PAIRS: &[(char, char)] = &[('“', '”'), ('«', '»'), ('"', '"'), ('\'', '\'')];
@@ -928,24 +944,28 @@ fn strip_leading_meta(text: &str) -> String {
 }
 
 fn strip_trailing_meta(text: &str) -> String {
-    let trimmed = text.trim();
-    let Some(index) = trimmed.rfind("\n\n") else {
-        return trimmed.to_string();
-    };
-    let before = trimmed[..index].trim_end();
-    let last = trimmed[index + 2..].trim_start();
-    if before.is_empty() {
-        return trimmed.to_string();
+    let mut remaining = text.trim().to_string();
+    let mut dropped = 0;
+    while dropped < 2 {
+        let Some(index) = remaining.rfind("\n\n") else {
+            break;
+        };
+        let before = remaining[..index].trim_end();
+        let last = remaining[index + 2..].trim_start();
+        if before.is_empty() {
+            break;
+        }
+        let lower = last.to_lowercase();
+        if !TRAILING_META_PREFIXES
+            .iter()
+            .any(|prefix| lower.starts_with(prefix))
+        {
+            break;
+        }
+        remaining = before.to_string();
+        dropped += 1;
     }
-    let lower = last.to_lowercase();
-    if TRAILING_META_PREFIXES
-        .iter()
-        .any(|prefix| lower.starts_with(prefix))
-    {
-        before.to_string()
-    } else {
-        trimmed.to_string()
-    }
+    remaining
 }
 
 fn strip_wrapping_quotes(text: &str) -> String {
@@ -1142,6 +1162,7 @@ mod tests {
         let user = Prompt {
             id: "user-custom".into(),
             template: "{{text}}".into(),
+            hotkey: "Command+Alt+KeyJ".into(),
             ..Prompt::default()
         };
         PromptStore {
@@ -1152,7 +1173,10 @@ mod tests {
 
         let loaded = PromptStore::load(&path);
         assert!(loaded.get("summarize").is_none());
-        assert!(loaded.get("user-custom").is_some());
+        assert_eq!(
+            loaded.get("user-custom").map(|prompt| prompt.hotkey.as_str()),
+            Some("Control+Alt+KeyJ")
+        );
         assert_eq!(loaded.prompts.iter().filter(|prompt| prompt.builtin).count(), 5);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1230,6 +1254,38 @@ mod tests {
         assert_eq!(clean_output("«Привет, мир»"), "Привет, мир");
         assert_eq!(clean_output("“Hello”"), "Hello");
         assert_eq!(clean_output("\"Hello\""), "Hello");
+    }
+
+    #[test]
+    fn clean_output_drops_trailing_chat_paragraphs() {
+        assert_eq!(
+            clean_output("Привет, мир.\n\nЕсли хотите, могу сделать короче."),
+            "Привет, мир."
+        );
+        assert_eq!(
+            clean_output("Привет, мир.\n\nДайте знать, если нужны правки."),
+            "Привет, мир."
+        );
+        assert_eq!(
+            clean_output("Hello.\n\nWould you like me to shorten it?"),
+            "Hello."
+        );
+        assert_eq!(
+            clean_output("Hello.\n\nFeel free to ask for changes."),
+            "Hello."
+        );
+        assert_eq!(
+            clean_output("Привет.\n\nЕсли у вас есть вопросы, обращайтесь."),
+            "Привет."
+        );
+        assert_eq!(
+            clean_output("Hello.\n\nI'd be happy to help further."),
+            "Hello."
+        );
+        assert_eq!(
+            clean_output("Hello.\n\nI can make it shorter.\n\nLet me know."),
+            "Hello."
+        );
     }
 
     #[test]
