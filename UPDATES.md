@@ -6,8 +6,10 @@
 
 ### Как проверить новую версию
 
-1. Откройте раздел **Releases** репозитория:
+1. Откройте раздел **Releases** репозитория — на GitVerse или в зеркале на GitHub
+   (файлы и контрольные суммы одинаковые):
    https://gitverse.ru/mibazarow/Button-S-local-corrector/releases
+   https://github.com/mibazarow/Button-S-local-corrector/releases
 2. Посмотрите последнюю версию. Если она новее установленной — скачайте DMG.
 3. Перед установкой закройте BUTTON-S: иконка **S** в строке меню → **Выход**.
 4. Откройте DMG и перетащите **BUTTON-S** в `Applications`, подтвердив замену.
