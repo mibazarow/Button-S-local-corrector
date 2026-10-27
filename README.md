@@ -11,7 +11,8 @@ BUTTON-S — небольшой фоновый помощник для macOS и 
 **Версия 1.2.0 · macOS 13+ (Apple Silicon) · Windows 10/11 x64 · Linux — следом · без подписок · без телеметрии.**
 
 > **Платформы.** Релиз **1.2.0** для **macOS** и **Windows** опубликован:
-> [BUTTON-S 1.2.0](https://gitverse.ru/mibazarow/Button-S-local-corrector/releases/tag/v1.2.0).
+> [BUTTON-S 1.2.0 на GitVerse](https://gitverse.ru/mibazarow/Button-S-local-corrector/releases/tag/v1.2.0)
+> · [зеркало на GitHub](https://github.com/mibazarow/Button-S-local-corrector/releases/tag/v1.2.0).
 > Linux — следующий этап. Официальные сборки и исходники — в этом репозитории.
 
 <p align="center">
@@ -164,7 +165,7 @@ Right Shift назначен по умолчанию; для заглавных 
 
 **Требования:** macOS 13+ (Apple Silicon) или Windows 10/11 x64. Приложение работает в строке меню / трее.
 
-1. Скачайте DMG (macOS) или ZIP с установщиком (Windows) из раздела **Releases** этого репозитория.
+1. Скачайте DMG (macOS) или ZIP с установщиком (Windows) из раздела **Releases** — на [GitVerse](https://gitverse.ru/mibazarow/Button-S-local-corrector/releases) или в [зеркале на GitHub](https://github.com/mibazarow/Button-S-local-corrector/releases). Файлы и контрольные суммы одинаковые.
 2. macOS: откройте DMG и перетащите **BUTTON-S** в `Applications`. Windows: распакуйте ZIP и запустите `BUTTON-S_1.2.0_x64-setup.exe`.
 3. Запустите приложение. Сборка не нотаризована, поэтому при первом запуске может понадобиться правый клик → **Открыть**.
 4. Выдайте разрешения:

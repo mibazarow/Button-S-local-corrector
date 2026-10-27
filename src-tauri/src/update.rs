@@ -9,6 +9,9 @@ use tauri::{AppHandle, Manager};
 use crate::state::AppState;
 
 pub const RELEASES_URL: &str = "https://gitverse.ru/mibazarow/Button-S-local-corrector/releases";
+const GITHUB_RELEASES_URL: &str =
+    "https://github.com/mibazarow/Button-S-local-corrector/releases";
+const RELEASE_PAGES: &[&str] = &[RELEASES_URL, GITHUB_RELEASES_URL];
 const CHECK_INTERVAL_SECS: u64 = 8 * 60 * 60;
 const LOG_LIMIT: usize = 3;
 const LOG_FILE: &str = "update-check.json";
@@ -124,15 +127,9 @@ fn latest_from_html(html: &str) -> Option<String> {
     best.map(|(_, raw)| raw)
 }
 
-async fn fetch_latest() -> Result<(String, String), String> {
-    let client = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(5))
-        .timeout(Duration::from_secs(12))
-        .user_agent("BUTTON-S-update-check")
-        .build()
-        .map_err(|error| error.to_string())?;
+async fn fetch_from(client: &reqwest::Client, page: &str) -> Result<(String, String), String> {
     let body = client
-        .get(RELEASES_URL)
+        .get(page)
         .send()
         .await
         .map_err(|error| format!("update check request: {error}"))?
@@ -143,8 +140,25 @@ async fn fetch_latest() -> Result<(String, String), String> {
         .map_err(|error| format!("update check body: {error}"))?;
     let latest = latest_from_html(&body)
         .ok_or_else(|| "no release tag on the releases page".to_string())?;
-    let url = format!("{RELEASES_URL}/tag/v{latest}");
-    Ok((latest, url))
+    Ok((latest.clone(), format!("{page}/tag/v{latest}")))
+}
+
+/// GitVerse — основной источник, GitHub — зеркало на случай недоступности.
+async fn fetch_latest() -> Result<(String, String), String> {
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(12))
+        .user_agent("BUTTON-S-update-check")
+        .build()
+        .map_err(|error| error.to_string())?;
+    let mut last_error = String::new();
+    for page in RELEASE_PAGES {
+        match fetch_from(&client, page).await {
+            Ok(found) => return Ok(found),
+            Err(error) => last_error = error,
+        }
+    }
+    Err(last_error)
 }
 
 pub async fn check(dir: &Path) -> UpdateInfo {
@@ -242,6 +256,7 @@ pub async fn check_update(app: AppHandle) -> Result<UpdateInfo, String> {
 
 const ALLOWED_HOSTS: &[&str] = &[
     "gitverse.ru",
+    "github.com",
     "bazarow.ru",
     "www.bazarow.ru",
     "donationalerts.com",
@@ -284,6 +299,15 @@ mod tests {
     #[test]
     fn releases_url_points_to_the_button_s_repository() {
         assert!(RELEASES_URL.contains("/mibazarow/Button-S-local-corrector/releases"));
+        assert!(GITHUB_RELEASES_URL.contains("/mibazarow/Button-S-local-corrector/releases"));
+        assert_eq!(RELEASE_PAGES[0], RELEASES_URL);
+    }
+
+    #[test]
+    fn github_release_links_can_be_opened() {
+        assert!(allowed(
+            "https://github.com/mibazarow/Button-S-local-corrector/releases/tag/v1.2.0"
+        ));
     }
 
     #[test]

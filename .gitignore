@@ -47,6 +47,7 @@ models/
 *.cer
 *.key
 docs/gitverse-token.md
+docs/github-token.md
 
 # Internal docs and design screenshots (not published)
 .internal/
