@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, OnceLock};
 use std::thread;
@@ -65,6 +65,27 @@ enum Command {
 }
 
 static SENDER: OnceLock<Sender<Command>> = OnceLock::new();
+
+/// Сериализует расшифровки: два Whisper-стейта одного контекста одновременно
+/// на Metal и CPU ведут себя непредсказуемо.
+static TRANSCRIBE: OnceLock<Mutex<()>> = OnceLock::new();
+
+/// Идёт ли запись прямо сейчас. Расшифровка живёт в отдельном потоке, поэтому
+/// поздно завершившаяся диктовка не должна гасить HUD новой.
+static RECORDING: AtomicBool = AtomicBool::new(false);
+
+/// 400 секунд при 16 кГц. Буфер хранит уже пересэмплированные в моно фреймы
+/// устройства, поэтому это верхняя граница, а не точная длительность.
+const MAX_RECORDING_SAMPLES: usize = 16_000 * 400;
+
+const MIN_TRANSCRIBE_THREADS: usize = 4;
+
+fn transcribe_threads() -> usize {
+    std::thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(MIN_TRANSCRIBE_THREADS)
+        .clamp(MIN_TRANSCRIBE_THREADS, 8)
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -256,6 +277,8 @@ struct Recording {
     stream: cpal::Stream,
     samples: Arc<Mutex<Vec<f32>>>,
     level: Arc<AtomicU32>,
+    new_frames: Arc<AtomicU32>,
+    appended: Arc<AtomicUsize>,
     started: Instant,
     sample_rate: u32,
     last_voice: Instant,
@@ -320,7 +343,7 @@ fn load_context(state: &AppState) -> Option<whisper_rs::WhisperContext> {
 
 fn reload_context(
     state: &AppState,
-    context: &mut Option<whisper_rs::WhisperContext>,
+    context: &mut Option<Arc<whisper_rs::WhisperContext>>,
     loaded_path: &mut Option<PathBuf>,
 ) {
     let path = model_path(state);
@@ -330,14 +353,14 @@ fn reload_context(
     *context = None;
     *loaded_path = None;
     if let Some(loaded) = load_context(state) {
-        *context = Some(loaded);
+        *context = Some(Arc::new(loaded));
         *loaded_path = Some(path);
     }
 }
 
 fn worker(app: AppHandle, state: Arc<AppState>, receiver: mpsc::Receiver<Command>) {
     let mut recording: Option<Recording> = None;
-    let mut context = load_context(&state);
+    let mut context = load_context(&state).map(Arc::new);
     let mut loaded_path = context.as_ref().map(|_| model_path(&state));
     let mut reload_pending = false;
 
@@ -363,6 +386,7 @@ fn worker(app: AppHandle, state: Arc<AppState>, receiver: mpsc::Receiver<Command
             }
             Ok(Command::Cancel) => {
                 recording = None;
+                RECORDING.store(false, Ordering::Relaxed);
                 hide_hud(&app);
                 state.emit_event("voice-state", json!({ "state": "idle" }));
                 if reload_pending {
@@ -394,6 +418,8 @@ fn worker(app: AppHandle, state: Arc<AppState>, receiver: mpsc::Receiver<Command
             Err(RecvTimeoutError::Timeout) => {
                 if let Some(active) = recording.as_mut() {
                     let level = f32::from_bits(active.level.load(Ordering::Relaxed));
+                    let audio_received = active.new_frames.swap(0, Ordering::Relaxed) > 0;
+                    trim_samples(active);
                     let (threshold, end_silence, mode, max_duration) = {
                         let config = state.config.read();
                         (
@@ -408,7 +434,9 @@ fn worker(app: AppHandle, state: Arc<AppState>, receiver: mpsc::Receiver<Command
                         active.last_voice = Instant::now();
                     }
 
-                    if !active.hud_shown && active.started.elapsed().as_millis() >= 250 {
+                    if !active.hud_shown
+                        && (audio_received || active.started.elapsed().as_millis() >= 250)
+                    {
                         show_hud(&app, &state);
                         state.emit_event("voice-state", json!({ "state": "recording" }));
                         active.hud_shown = true;
@@ -484,9 +512,14 @@ fn start_recording(state: &Arc<AppState>) -> Result<Recording, String> {
     let sample_rate = supported.sample_rate();
     let channels = supported.channels() as usize;
     let sample_format = supported.sample_format();
+    state.diag(&format!(
+        "audio device: {channels} ch, {sample_rate} Hz, {sample_format:?}"
+    ));
 
     let samples = Arc::new(Mutex::new(Vec::<f32>::new()));
     let level = Arc::new(AtomicU32::new(0));
+    let new_frames = Arc::new(AtomicU32::new(0));
+    let appended = Arc::new(AtomicUsize::new(0));
     let error_state = state.clone();
 
     let stream = build_stream(
@@ -494,19 +527,26 @@ fn start_recording(state: &Arc<AppState>) -> Result<Recording, String> {
         &supported,
         sample_format,
         channels,
-        samples.clone(),
-        level.clone(),
+        AudioBuffer {
+            samples: samples.clone(),
+            level: level.clone(),
+            new_frames: new_frames.clone(),
+            appended: appended.clone(),
+        },
         error_state,
     )?;
 
     stream
         .play()
         .map_err(|error| format!("Не удалось начать запись: {error}"))?;
+    RECORDING.store(true, Ordering::Relaxed);
 
     Ok(Recording {
         stream,
         samples,
         level,
+        new_frames,
+        appended,
         started: Instant::now(),
         sample_rate,
         last_voice: Instant::now(),
@@ -524,53 +564,51 @@ fn build_stream(
     supported: &cpal::SupportedStreamConfig,
     sample_format: SampleFormat,
     channels: usize,
-    samples: Arc<Mutex<Vec<f32>>>,
-    level: Arc<AtomicU32>,
+    buffer: AudioBuffer,
     state: Arc<AppState>,
 ) -> Result<cpal::Stream, String> {
     let config = supported.config();
     let error_callback = move |error: cpal::Error| {
-        log::warn!("audio stream error: {error}");
-        state.emit_event(
-            "toast",
-            json!({ "kind": "error", "text": format!("Ошибка аудио: {error}") }),
-        );
+        let text = format!("audio stream error: {error}");
+        log::warn!("{text}");
+        state.diag(&text);
+        notify_audio_error(&state, &error);
     };
 
     let result = match sample_format {
         SampleFormat::F32 => device.build_input_stream(
             config,
-            move |data: &[f32], _: &_| collect::<f32>(data, channels, &samples, &level),
+            move |data: &[f32], _: &_| collect::<f32>(data, channels, &buffer),
             error_callback,
             None,
         ),
         SampleFormat::I16 => device.build_input_stream(
             config,
-            move |data: &[i16], _: &_| collect::<i16>(data, channels, &samples, &level),
+            move |data: &[i16], _: &_| collect::<i16>(data, channels, &buffer),
             error_callback,
             None,
         ),
         SampleFormat::I32 => device.build_input_stream(
             config,
-            move |data: &[i32], _: &_| collect::<i32>(data, channels, &samples, &level),
+            move |data: &[i32], _: &_| collect::<i32>(data, channels, &buffer),
             error_callback,
             None,
         ),
         SampleFormat::I8 => device.build_input_stream(
             config,
-            move |data: &[i8], _: &_| collect::<i8>(data, channels, &samples, &level),
+            move |data: &[i8], _: &_| collect::<i8>(data, channels, &buffer),
             error_callback,
             None,
         ),
         SampleFormat::U16 => device.build_input_stream(
             config,
-            move |data: &[u16], _: &_| collect::<u16>(data, channels, &samples, &level),
+            move |data: &[u16], _: &_| collect::<u16>(data, channels, &buffer),
             error_callback,
             None,
         ),
         SampleFormat::U8 => device.build_input_stream(
             config,
-            move |data: &[u8], _: &_| collect::<u8>(data, channels, &samples, &level),
+            move |data: &[u8], _: &_| collect::<u8>(data, channels, &buffer),
             error_callback,
             None,
         ),
@@ -580,15 +618,25 @@ fn build_stream(
     result.map_err(|error| format!("Не удалось открыть микрофон: {error}"))
 }
 
-fn collect<T>(data: &[T], channels: usize, samples: &Mutex<Vec<f32>>, level: &AtomicU32)
+struct AudioBuffer {
+    samples: Arc<Mutex<Vec<f32>>>,
+    level: Arc<AtomicU32>,
+    new_frames: Arc<AtomicU32>,
+    appended: Arc<AtomicUsize>,
+}
+
+fn collect<T>(data: &[T], channels: usize, buffer: &AudioBuffer)
 where
     T: Sample,
     f32: FromSample<T>,
 {
-    let mut guard = match samples.try_lock() {
-        Some(guard) => guard,
-        None => return,
+    if data.is_empty() {
+        return;
+    }
+    let Some(mut guard) = buffer.samples.try_lock() else {
+        return;
     };
+    guard.reserve(data.len() / channels.max(1));
     let mut sum = 0.0f32;
     let mut count = 0usize;
 
@@ -603,22 +651,38 @@ where
         count += 1;
     }
 
-    if count > 0 {
-        let rms = (sum / count as f32).sqrt();
-        level.store(rms.to_bits(), Ordering::Relaxed);
-    }
+    let rms = (sum / count.max(1) as f32).sqrt();
+    buffer.level.store(rms.to_bits(), Ordering::Relaxed);
+    buffer
+        .new_frames
+        .fetch_add(count as u32, Ordering::Relaxed);
+    buffer.appended.fetch_add(count, Ordering::Relaxed);
+}
 
-    if guard.len() > 16_000 * 400 {
-        let excess = guard.len() - 16_000 * 400;
+/// Обрезка буфера живёт в воркере, а не в аудиоколбэке: `drain` в горячем
+/// пути давал xrun и «Ошибку аудио» на Windows.
+fn trim_samples(active: &mut Recording) {
+    trim_buffer(&active.samples, &active.appended);
+}
+
+/// Оставляет самые свежие сэмплы: старые вытесняются, новые не теряются.
+fn trim_buffer(samples: &Mutex<Vec<f32>>, appended: &AtomicUsize) {
+    if appended.load(Ordering::Relaxed) <= MAX_RECORDING_SAMPLES {
+        return;
+    }
+    let mut guard = samples.lock();
+    if guard.len() > MAX_RECORDING_SAMPLES {
+        let excess = guard.len() - MAX_RECORDING_SAMPLES;
         guard.drain(..excess);
     }
+    appended.store(guard.len(), Ordering::Relaxed);
 }
 
 fn finish_recording(
     app: &AppHandle,
     state: &Arc<AppState>,
     active: Recording,
-    context: &mut Option<whisper_rs::WhisperContext>,
+    context: &mut Option<Arc<whisper_rs::WhisperContext>>,
     loaded_path: &mut Option<PathBuf>,
 ) {
     let samples = {
@@ -626,6 +690,7 @@ fn finish_recording(
         std::mem::take(&mut *guard)
     };
     drop(active.stream);
+    RECORDING.store(false, Ordering::Relaxed);
 
     let seconds = active.started.elapsed().as_secs_f32();
     if seconds < 0.35 || samples.is_empty() {
@@ -642,7 +707,7 @@ fn finish_recording(
     if context.is_none() {
         match load_context(state) {
             Some(loaded) => {
-                *context = Some(loaded);
+                *context = Some(Arc::new(loaded));
                 *loaded_path = Some(model_path(state));
             }
             None => {
@@ -653,7 +718,7 @@ fn finish_recording(
         }
     }
 
-    let Some(context) = context.as_ref() else {
+    let Some(model) = context.clone() else {
         hide_hud(app);
         return;
     };
@@ -661,8 +726,28 @@ fn finish_recording(
     let punctuation = state.config.read().voice.punctuation;
     let remove_fillers = state.config.read().voice.remove_fillers;
 
-    let result = transcribe(context, &resampled, punctuation, remove_fillers);
+    let app = app.clone();
+    let state = state.clone();
+    thread::spawn(move || {
+        // Одна расшифровка за раз: Whisper-стейты одного контекста не любят параллель.
+        let _serial = TRANSCRIBE.get_or_init(|| Mutex::new(())).lock();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            transcribe(&model, &resampled, punctuation, remove_fillers)
+        }))
+        .unwrap_or_else(|_| Err("Сбой распознавания речи".into()));
 
+        deliver_transcript(&state, result, seconds);
+
+        if RECORDING.load(Ordering::Relaxed) {
+            return;
+        }
+        thread::sleep(Duration::from_millis(400));
+        hide_hud(&app);
+        state.emit_event("voice-state", json!({ "state": "idle" }));
+    });
+}
+
+fn deliver_transcript(state: &AppState, result: Result<String, String>, seconds: f32) {
     match result {
         Ok(text) if !text.trim().is_empty() => {
             if let Err(error) = crate::actions::insert_via_clipboard(&text) {
@@ -686,10 +771,6 @@ fn finish_recording(
         }
         Err(error) => notify_error(state, &error),
     }
-
-    thread::sleep(Duration::from_millis(400));
-    hide_hud(app);
-    state.emit_event("voice-state", json!({ "state": "idle" }));
 }
 
 fn transcribe(
@@ -704,7 +785,8 @@ fn transcribe(
         .create_state()
         .map_err(|error| format!("Состояние модели: {error}"))?;
 
-    let language = detect_language(&mut whisper_state, samples, 4);
+    let threads = transcribe_threads();
+    let language = detect_language(&mut whisper_state, samples, threads);
 
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
     params.set_language(Some(language));
@@ -713,7 +795,7 @@ fn transcribe(
     params.set_print_realtime(false);
     params.set_print_timestamps(false);
     params.set_no_context(true);
-    params.set_n_threads(4);
+    params.set_n_threads(threads as i32);
 
     whisper_state
         .full(params, samples)
@@ -830,6 +912,30 @@ fn notify_error(state: &AppState, text: &str) {
     state.emit_event("toast", json!({ "kind": "error", "text": text }));
 }
 
+/// Аудиопоток может сыпать ошибками каждые несколько миллисекунд — тост не чаще
+/// раза в 30 секунд, всё остальное уходит в diagnostics.
+fn notify_audio_error(state: &AppState, error: &cpal::Error) {
+    static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    let previous = LAST.load(Ordering::Relaxed);
+    if now.saturating_sub(previous) < 30 {
+        return;
+    }
+    if LAST
+        .compare_exchange(previous, now, Ordering::Relaxed, Ordering::Relaxed)
+        .is_err()
+    {
+        return;
+    }
+    state.emit_event(
+        "toast",
+        json!({ "kind": "error", "text": format!("Ошибка аудио: {error}") }),
+    );
+}
+
 pub fn audio_devices() -> Vec<String> {
     let host = cpal::default_host();
     let mut devices = Vec::new();
@@ -940,6 +1046,36 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("create temp dir");
         let config_path = dir.join("config.json");
         (AppState::new(Config::default(), config_path.clone()), dir)
+    }
+
+    #[test]
+    fn trim_buffer_keeps_the_newest_samples() {
+        let samples = Mutex::new((0..MAX_RECORDING_SAMPLES + 5).map(|i| i as f32).collect());
+        let appended = AtomicUsize::new(MAX_RECORDING_SAMPLES + 5);
+
+        trim_buffer(&samples, &appended);
+
+        let guard = samples.lock();
+        assert_eq!(guard.len(), MAX_RECORDING_SAMPLES);
+        assert_eq!(guard[0], 5.0);
+        assert_eq!(guard[guard.len() - 1], (MAX_RECORDING_SAMPLES + 4) as f32);
+        assert_eq!(appended.load(Ordering::Relaxed), MAX_RECORDING_SAMPLES);
+    }
+
+    #[test]
+    fn trim_buffer_leaves_short_recordings_alone() {
+        let samples = Mutex::new(vec![1.0, 2.0, 3.0]);
+        let appended = AtomicUsize::new(3);
+
+        trim_buffer(&samples, &appended);
+
+        assert_eq!(samples.lock().len(), 3);
+    }
+
+    #[test]
+    fn transcribe_threads_stay_within_bounds() {
+        let threads = transcribe_threads();
+        assert!((MIN_TRANSCRIBE_THREADS..=8).contains(&threads));
     }
 
     #[test]

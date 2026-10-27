@@ -208,6 +208,16 @@ npx tauri build
 
 Release-сборка создаёт `.app` и `.dmg` в `src-tauri/target/release/bundle/`.
 
+На Windows для `whisper-rs-sys` нужен clang и заголовки MSVC — иначе генерация биндингов падает:
+
+```powershell
+$env:LIBCLANG_PATH = "C:\Program Files\LLVM\bin"
+$env:BINDGEN_EXTRA_CLANG_ARGS = "-I`"$msvc\include`" -I`"$sdk\ucrt`" -I`"$sdk\shared`" -I`"$sdk\um`""
+npx tauri build
+```
+
+Готовый установщик появится в `src-tauri/target/release/bundle/nsis/`.
+
 ## Что дальше
 
 - Полировка UX по реальному использованию.
