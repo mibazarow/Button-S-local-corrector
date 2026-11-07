@@ -15,6 +15,19 @@ BUTTON-S — небольшой фоновый помощник для macOS и 
 > · [зеркало на GitHub](https://github.com/mibazarow/Button-S-local-corrector/releases/tag/v1.2.0).
 > Linux — следующий этап. Официальные сборки и исходники — в этом репозитории.
 
+> ### Вторая версия: [BUTTON-S v2 на чистом Swift](https://github.com/mibazarow/button-s-versia2)
+>
+> Первая версия, которую вы читаете, сделана на **Tauri + Rust + Svelte** и в распознавании речи опирается на **Python-воркер** с `mlx-whisper`. Это работает, но тянет за собой три тулчейна и отдельный процесс.
+>
+> [**BUTTON-S v2**](https://github.com/mibazarow/button-s-versia2) — тот же ускоритель ввода, переписанный с нуля **только на Swift** и **SwiftUI**, с распознаванием речи через **WhisperKit** на CoreML и Neural Engine. Без Python, без Rust, без Node на машине пользователя. Логика исправлений перенесена один в один: те же таблицы раскладок, те же пороги, тот же алгоритм.
+>
+> **Что есть в v2:** раскладка, опечатки, залипший Shift, капитализация, списки и диктовка Whisper — всё локально.
+> **Чего в v2 пока нет:** ИИ и перефразирование, облачные и локальные провайдеры, перевод, личный словарь, Windows и Intel-маки.
+>
+> **Требования v2:** macOS 14+ и Apple Silicon. Если вам нужен ИИ, Windows или Intel — оставайтесь на первой версии, она никуда не денется.
+>
+> → [Исходники v2](https://github.com/mibazarow/button-s-versia2) · [README v2](https://github.com/mibazarow/button-s-versia2/blob/main/README.md)
+
 <p align="center">
   <a href="https://www.donationalerts.com/r/bazarow_ru">
     <img src="docs/assets/readme/support.png" alt="Поддержать разработку BUTTON-S" width="960">
